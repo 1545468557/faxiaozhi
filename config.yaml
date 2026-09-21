@@ -1,0 +1,266 @@
+# 法小智 · 策略配置（外置；不含任何密钥，可提交到仓库）
+# 密钥只放在 .env 里。改本文件不需要改代码。
+
+agent:
+  name: 法小智
+  id: legal_case_match_agent
+  disclosure: "以上分析仅供教学、学习和法律研究参考，不构成正式法律意见。涉及实际案件或重大权益，请由执业律师结合完整材料复核。"
+
+model:
+  max_tokens: 4000
+  timeout_seconds: 120
+  max_retries: 3
+  base_delay_seconds: 0.5
+  temperature:
+    retrieve: 0.3
+    extract: 0.2
+    synthesize: 0.2
+
+limits:
+  max_questions: 3                # 追问上限（硬约束，不可改大）
+  max_candidates: 30
+  min_sample_for_conclusion: 2
+  max_concurrent_sessions: 4
+  session_ttl_seconds: 1800        # 空闲超过 30 分钟的会话自动释放
+  first_response_budget_ms: 3000
+  full_report_budget_ms: 120000
+  max_agent_steps: 8
+  max_schema_retries: 1
+  max_workflow_steps: 40
+  max_source_chars: 6000          # 单条来源注入提示词的最大字符数
+  max_tool_result_chars: 4000     # 工具结果进 messages 前的截断阈值
+  max_upload_mb: 20
+  max_retries_per_run: 3          # 2-2 新增：同一次研究最多点几次「重试」
+  allowed_upload_ext: [".docx", ".pdf", ".txt", ".md"]
+
+policy:
+  allow_synthetic: false          # 夹具数据是否可引用（演示/回归用；默认关闭）
+  require_effective_status: true
+  require_quote_match: true
+  require_user_material_review: true
+  min_quote_length: 8
+  forbidden_patterns: []          # 追加的表达边界正则
+
+# ---- 法律咨询（阶段 2-5）----
+consult:
+  # 追问上限：**AI 向用户澄清事实的轮数**（PRD C-10 硬约束，不得改大）。
+  # 用户继续提问属于正常使用，不受此限制（产品经理 2026-09-18 确认，台账 D12）。
+  max_clarifying_rounds: 3
+  max_questions_per_round: 1      # 每轮一个关键事实；代码硬限制为 1
+  max_steps: 8                    # 单次咨询的模型+工具步数上限
+  temperature: 0.3                # 识别与解答都用这一档（稳，不发挥）
+  # 咨询专属的拒答／越界表述（会转成正则并入表达边界；**全部配置化，随时可加**）
+  expression_extra:
+    - "一定能赢"
+    - "稳赢"
+    - "百分百"
+    - "保证胜诉"
+    - "必然胜诉"
+    - "直接提交法院"
+    - "可直接提交法院"
+    - "可以提交给法院"
+    - "本意见可替代律师"
+    - "无需咨询律师"
+
+# ---- 合同审查（阶段 2-6）----
+contract:
+  max_chars: 60000                # 单份合同送入模型的正文上限（超出会显式说明被截断）
+  max_clauses: 200                # 条款块上限（防超长合同把上下文撞爆）
+  max_risks: 40                   # 单份合同风险条目上限
+  review_timeout_seconds: 120     # 单份合同完整审查上限（对齐 PRD 性能指标）
+  temperature: 0.2                # 合同审查要稳，不要发挥
+  require_stance: true            # 立场未确认不得继续（PRD 硬要求，不许关）
+  allow_suggestion_text: true     # 是否生成「建议条款示例表述」（必须带「须经律师审定」）
+  # 合同审查专属拒答／越界表述（转成正则并入表达边界；**全部配置化，随时可加**）
+  expression_extra:
+    - "可直接签署"
+    - "可直接提交法院"
+    - "无需律师审阅"
+    - "无需律师审核"
+    - "本报告已替代律师意见"
+    - "不存在任何风险"
+    - "肯定没有风险"
+  # 风险分类分级（对齐 PRD 8.1；改这里即可扩展，无需改代码）
+  risk:
+    kinds: [illegal, commercial, wording]
+    levels: [high, medium, low]
+
+# ---- 上传文件安全（2-2 新增；底线 6）----
+files:
+  sniff_magic_bytes: true         # 读文件头判定真实类型（不只看扩展名）
+  block_zip_bomb: true            # 轻量防护：解析前先看解压后 / 压缩后比值
+  max_uncompressed_ratio: 200     # 超过该比值即拒绝（正常 docx 远低于此值）
+
+mcp:
+  timeout_seconds: 20
+  connect_timeout_seconds: 5      # 2-2 新增：连接阶段单独超时
+  max_retries: 2
+  backoff_base_seconds: 0.5       # 2-2 新增：指数退避基数
+  backoff_max_seconds: 8          # 2-2 新增：退避上限
+  degrade_on_parse_error: true    # 2-2 新增：返回体解析失败按降级处理，不抛未捕获异常
+  circuit_breaker:                # 2-2 新增：熔断
+    enabled: true
+    failure_threshold: 5          # 连续失败达 5 次
+    open_seconds: 60              # 熔断打开 60 秒
+  # 逻辑工具 -> .env 地址变量名（按顺序尝试，第一个能用或能返回结果的生效；末位一般是聚合地址兜底）
+  endpoints:
+    search_statutes:      [PKULAW_URL_STATUTE_SEMANTIC, PKULAW_URL_AGGREGATE]
+    search_cases:         [PKULAW_URL_CASE_SEMANTIC, PKULAW_URL_AGGREGATE]
+    exact_statute:        [PKULAW_URL_STATUTE_EXACT, PKULAW_URL_AGGREGATE]
+    recognize_statutes:   [PKULAW_URL_STATUTE_TRACE, PKULAW_URL_AGGREGATE]
+    recognize_case_number: [PKULAW_URL_CASE_TRACE, PKULAW_URL_AGGREGATE]
+    fix_hallucination:    [PKULAW_URL_ANTI_HALLUCINATION, PKULAW_URL_AGGREGATE]
+    statute_history:      [PKULAW_URL_STATUTE_HISTORY, PKULAW_URL_AGGREGATE]
+    hyperlink:            [PKULAW_URL_HYPERLINK, PKULAW_URL_AGGREGATE]
+    law_list:             [PKULAW_URL_STATUTE_KEYWORD]
+    case_list:            [PKULAW_URL_CASE_KEYWORD]
+    procuratorate:        [PKULAW_URL_PROSECUTION]
+    enforcement:          [PKULAW_URL_ADMIN_ENFORCE]
+
+  # 真实工具名（2026-09-17 探针实测；接口改名时只改这里）
+  tool_names:
+    search_statutes: mcp-law-search-service.search_article
+    search_cases: mcp-case-search-service.search_case
+    exact_statute: mcp-fatiao.get_law_item_content
+    recognize_statutes: law_recognition.law_recognition
+    recognize_case_number: case_number_recognition.anhao_recognition
+    fix_hallucination: pku_citation_validator.adjust_provisions
+    statute_history: pkulaw-statute-history.get_article_history
+    hyperlink: add-doc-link.get_linked_content
+    law_list: mcp-law.get_law_list
+    case_list: mcp-case.get_case_list
+    procuratorate: search_procuratorate
+    enforcement: search_enforcement
+
+  # 我方工具入参 -> MCP 真实入参（改这里不改代码）
+  arg_map:
+    search_statutes: { query: text, applicable_at: implement_date_end }
+    search_cases:
+      expression: text
+      # 案由（cause）不单独传参：接口无该筛选字段，改为拼进检索文本（见 translate_args）
+      court: courthouse_name
+      level: case_grade
+      region: courthouse_province
+      since: decision_date_start
+      limit: size
+    exact_statute: { title: title, tiao_num: tiao_num }
+    recognize_statutes: { text: text }
+    recognize_case_number: { text: text }
+    fix_hallucination: { userlaw: userlaw, answerlaw: answerlaw, prompt: prompt }
+    statute_history: { lawTitle: lawTitle, articleNumber: articleNumber, asOf: asOf }
+    hyperlink: { message: message }
+
+  limits:
+    max_size: 20            # MCP 侧 size 上限（超过会被拒或被截断）
+    default_size: 10
+
+  # 返回体归一化：先按下面路径找清单，取不到再按候选字段名逐个尝试
+  field_map:
+    list_candidates:
+      - result.list
+      - result.data
+      - result.records
+      - result.items
+      - result.results
+      - result.rows
+      - result
+      - data.list
+      - data.data
+      - data.records
+      - data.items
+      - data.results
+      - data.rows
+      - data
+      - list
+      - items
+      - records
+      - results
+      - rows
+    statute:                                  # 实测自 mcp-law-search-service.search_article
+      title: [title, lawTitle, law_title, name, 法规名称, 标题]
+      quote: [article, content, text, fullText, docContent, 正文]
+      identifier_clause_from_quote: true      # 条号从 article 开头抽取，与 title 拼成引用标识
+      effective_status: [timeliness, effectiveStatus, effectiveness, 时效性]
+      applicable_from: [implementation_date, ImplementDate, implementDate, 施行日期]
+      applicable_to: [expiry_date, endDate, 失效日期]
+      uri: [url, link, docUrl, 法宝链接, fkUrl]
+      doc_no: [doc_no, DocumentNO, 发文字号]
+    case:                                     # 实测自 mcp-case-search-service.search_case
+      title: [title, caseTitle, 标题]
+      identifier: [caseNumber, caseFlag, caseNo, 案号]
+      quote: [identified, content, text, fullText, 裁判理由]       # 本院认为（可逐字引用）
+      quote_extra: [ascertain, refereeResult]                 # 查明事实 + 裁判结果，一并给提炼用
+      court: [courthouseName, court, courtName, 审理法院]
+      level: [caseGrade, case_grade, courtLevel, 参照级别]
+      region: [courthouseProvince, courthouse_province, province, 省份]
+      decided_on: [decisionDate, judgmentDate, 裁判日期]
+      doc_type: [docType, 文书类型]
+      cause: [causeOfAction, 案由]
+      uri: [url, link, docUrl, 法宝链接, fkUrl]
+
+export:
+  dir: exports
+  docx_template: research_memo_v1
+
+logging:
+  level: INFO
+  redact_material: true
+
+journal:
+  dir: runs
+  ttl_seconds: 3600               # 会话结束或超时即清理
+
+metrics:
+  path: data/metrics.jsonl
+  retention_days: 30
+  isolate_test_events: true       # 2-2 新增：真实/测试事件分离，北极星指标只取真实数据
+
+fixtures:
+  dir: fixtures
+
+# ---- 用户材料（2-4 新增；材料主路径）----
+materials:
+  max_files_per_upload: 20        # 单次批量上传文件数上限
+  role_default: case              # case | statute；未识别到特征时按此处理
+  auto_detect_role: true          # 从正文自动推断角色（案号/裁判文书 → 案例；《》第…条 → 法条）
+  require_review_before_cite: true  # 未核验不得引用（门禁 R3，沿用）
+  supersede_same_identifier: true   # 同标识只采用最新版本（旧版 superseded）
+  identifier_from_text: true        # 从正文抽取案号 / 法规名+条号
+  max_material_chars: 200000        # 单条材料进入会话的上限（超出截断并如实标记）
+
+# ---- 多源编排（2-3 新增）----
+# 来源顺序即优先级；只能改这里，不改业务代码。
+# local_library 只做「命中复用」，未命中必然继续走 pkulaw_mcp（不做本地优先检索，避免候选池偏向历史）。
+sources:
+  case:
+    providers: [local_library, pkulaw_mcp, fixtures]
+    require_authoritative: true
+  statute:
+    providers: [local_library, pkulaw_mcp, fixtures]
+    require_authoritative: true
+  merge:
+    dedupe_by: identifier
+    max_provider_calls: 3
+    per_provider_timeout_seconds: 20
+    local_hit_reuse: true                # 同一检索式命中本地缓存即复用（省配额）
+    search_cache_ttl_seconds: 86400      # 缓存有效期；过期后回到实时检索
+  # ---- 检索为辅（2-4 新增）：仅在「材料不足」或用户主动点击时检索 ----
+  supplement:
+    auto_when_below_min_sample: true     # 材料不足最小样本量时自动补一次检索
+    manual_button: true                  # 界面「补充检索」按钮
+    max_supplement_rounds: 2             # 同一次研究最多补充检索轮数
+    mark_as_supplement: true             # 补充来源单独标注，不改变用户材料的主体地位
+
+# ---- 本地依据库（2-3 新增；条目目录不提交，见 .gitignore 的 data/）----
+library:
+  dir: data/library                      # 条目目录（公开法条与判例原文；gitignored）
+  doc_dir: knowledge/library             # 格式与说明（提交仓库）
+  enabled: true
+  write_on_success: true                 # 真实检索成功后自动沉淀（可一键关闭）
+  cache_only_citable: true
+  cache_abstract_as_clue: true           # 仅摘要内容进「线索库」（citable=false）
+  max_entries: 50000                     # 条数上限
+  max_bytes: 2147483648                  # 2 GB
+  evict_policy: lru                      # 超限按最久未使用淘汰
+  max_entry_chars: 200000                # 单条原文上限
+  writeback_requires_review: false

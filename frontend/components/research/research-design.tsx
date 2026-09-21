@@ -1,0 +1,15 @@
+"use client";
+import { FileText } from "lucide-react";
+import type { Candidate, SourceBrief } from "@/lib/api/types";
+
+export function ResearchSteps({ step }: { step: number }) {
+  return <ol className="rx-steps" aria-label="检索流程">{["描述问题", "挑选案例", "对比分析", "生成报告"].map((label, i) => <li key={label} data-current={i === step} data-done={i < step} aria-current={i === step ? "step" : undefined}><b>{i < step ? "✓" : i + 1}</b><span>{label}</span></li>)}</ol>;
+}
+export function ResearchProgress({ title, progress, label, stepText }: { title: string; progress: number; label: string; stepText: string }) {
+  return <div className="rx-progress" role="status"><div className="rx-scan" aria-hidden="true"><i/><i/><i/><i/></div><h2>{title}</h2><p>先读清案例，再对齐事实、争议与裁判结果。</p><div className={`rx-track ${stepText ? "" : "rx-indeterminate"}`} aria-hidden="true"><span style={stepText ? { width: `${progress}%` } : undefined}/></div><div className="rx-progress-meta"><span>{label || "正在等待检索进度"}</span><span>{stepText}</span></div></div>;
+}
+export function ResearchCandidates({ candidates, sources, selection, activeId, onActive, onToggle, onOpen }: { candidates: Candidate[]; sources: SourceBrief[]; selection: string[]; activeId: string; onActive: (id: string) => void; onToggle: (id: string) => void; onOpen: (source: SourceBrief) => void }) {
+  const active = candidates.find(c => c.source_id === activeId) ?? candidates[0];
+  const source = sources.find(s => s.source_id === active?.source_id);
+  return <div className="rx-split"><div className="rx-candidates">{candidates.map(c => <article className="rx-candidate" key={c.source_id} data-active={active?.source_id === c.source_id}><input type="checkbox" aria-label={`选择 ${c.identifier || c.title || c.source_id}`} checked={selection.includes(c.source_id)} onChange={() => onToggle(c.source_id)}/><button type="button" aria-pressed={active?.source_id === c.source_id} onClick={() => onActive(c.source_id)}><small>{c.origin_text || "候选案例"}</small><h3>{c.title || c.identifier || "未提供标题"}</h3><p>{[c.court, c.decided_on].filter(Boolean).join(" · ") || "法院和裁判日期尚未提供"}</p><span>{c.identifier || "未识别到案号"}</span></button></article>)}</div><article className="rx-paper rx-case-detail"><div className="rx-paper-top"><FileText size={18}/> 案例详情</div>{active ? <div className="rx-paper-body"><h2>{active.title || active.identifier || "案例详情"}</h2><p>{active.identifier}</p><dl><div><dt>法院</dt><dd>{active.court || "未提供"}</dd></div><div><dt>裁判日期</dt><dd>{active.decided_on || "未提供"}</dd></div><div><dt>来源</dt><dd>{active.origin_text || "未提供"}</dd></div><div><dt>材料状态</dt><dd>{source?.status_text || "待查看来源详情"}</dd></div></dl><h3>可查看的内容</h3>{source?.quote ? <blockquote>{source.quote}</blockquote> : <p>当前候选信息未提供可展示的摘要。可先查看来源，再决定是否纳入对比。</p>}<div className="rx-note">确认所选案例后，再比较关键事实和裁判差异；候选命中并不代表结论适用于当前问题。</div>{source && <button type="button" className="ct-btn" onClick={() => onOpen(source)}>查看来源与核验详情</button>}</div> : <div className="rx-paper-body"><p>暂时没有候选案例。请刷新状态，或补充问题后重新检索。</p></div>}</article></div>;
+}

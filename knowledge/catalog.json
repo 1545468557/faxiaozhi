@@ -1,0 +1,24 @@
+{
+  "catalog": [
+    {
+      "name": "analysis-framework",
+      "one_liner": "法律关系识别与论证框架（问题—规范—事实—结论）"
+    },
+    {
+      "name": "element-spec",
+      "one_liner": "单案五要素提炼口径（事实/主张/争点/裁判理由/结果）"
+    },
+    {
+      "name": "stance-spec",
+      "one_liner": "观点归类规则（主流/相反/少数）与归类边界"
+    },
+    {
+      "name": "boundary-rules",
+      "one_liner": "表达边界规则：五类越界表述与改写口径"
+    },
+    {
+      "name": "risk-spec",
+      "one_liner": "合同风险分类分级标准（违法/商业不利/措辞不清 × 高/中/低）"
+    }
+  ]
+}

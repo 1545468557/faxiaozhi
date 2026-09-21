@@ -1,0 +1,3 @@
+export function ContractProgressVisual({progress,phaseLabel,stepText}:{progress?:number;phaseLabel?:string;stepText?:string}) {
+ return <><div className="cx-scan" aria-hidden="true"><i/><i/><i/><i/></div><h2>正在梳理合同里的关键约定</h2><p className="ct-lead">先看清原文，再逐条整理需要关注的地方。</p><div className="ct-bar" role="progressbar" aria-label="审查阶段进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} data-indeterminate={progress===undefined}><span style={{width:progress===undefined?"35%":`${Math.max(0,Math.min(100,progress))}%`}}/></div><div className="cx-progress-caption"><span>{phaseLabel||"正在准备审查"}</span><span>{stepText||"等待进度更新"}</span></div><p className="ct-mini">进度随实际审查阶段更新，耗时取决于合同长度与检索情况。</p></>;
+}

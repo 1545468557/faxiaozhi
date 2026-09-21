@@ -1,0 +1,984 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>法小智 · 类案检索与研究 / 法律咨询（阶段 2-5 验收界面）</title>
+<style>
+  :root { --line:#e3e6ea; --muted:#6b7280; --accent:#1f5fbf; --warn:#b45309; --ok:#15803d; --bad:#b91c1c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.6 -apple-system,"PingFang SC",\"Microsoft YaHei\",sans-serif; color:#111827; background:#f7f8fa; }
+  header { background:#fff; border-bottom:1px solid var(--line); padding:10px 16px; position:sticky; top:0; z-index:10; }
+  header h1 { font-size:16px; margin:0 0 6px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:12px; color:var(--muted); }
+  .pill { border:1px solid var(--line); border-radius:999px; padding:2px 8px; background:#fff; }
+  .pill.ok { color:var(--ok); border-color:#bbf7d0; background:#f0fdf4; }
+  .pill.bad { color:var(--bad); border-color:#fecaca; background:#fef2f2; }
+  .notice { margin:8px 0 0; padding:8px 10px; border-radius:6px; background:#fffbeb; border:1px solid #fde68a; color:var(--warn); font-size:13px; }
+  main { padding:12px 16px 40px; display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:14px; }
+  section { background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  h2 { font-size:14px; margin:0 0 8px; }
+  textarea, input, select { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+  button { padding:7px 12px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; font:inherit; }
+  button.ghost { background:#fff; color:var(--accent); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  ol.phases { display:flex; flex-wrap:wrap; gap:6px; list-style:none; padding:0; margin:0 0 8px; font-size:12px; }
+  ol.phases li { border:1px solid var(--line); border-radius:999px; padding:2px 8px; color:var(--muted); }
+  ol.phases li.on { border-color:var(--accent); color:var(--accent); font-weight:600; }
+  #log { max-height:150px; overflow:auto; font-size:12px; color:#374151; background:#f9fafb; border:1px dashed var(--line); border-radius:6px; padding:6px; }
+  .card { border:1px solid var(--line); border-radius:6px; padding:8px; margin-bottom:6px; }
+  .card .meta { font-size:12px; color:var(--muted); }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  th,td { border:1px solid var(--line); padding:4px 6px; text-align:left; vertical-align:top; }
+  th { background:#f3f4f6; }
+  /* 宽表（对比矩阵）在窄屏下横向滚动，不撑破页面（2-4 代操作验收实测缺陷 5） */
+  #matrix { overflow-x:auto; }
+  .cite { color:var(--accent); cursor:pointer; font-size:12px; }
+  .bad { color:var(--bad); }
+  .ok { color:var(--ok); }
+  aside section { position:sticky; top:74px; }
+  .tabs { display:flex; gap:6px; margin-bottom:8px; }
+  .tabs button { font-size:12px; padding:4px 8px; }
+  .srcline { font-size:12px; border-bottom:1px dashed var(--line); padding:4px 0; }
+  @media (max-width: 900px) {
+    main { grid-template-columns:minmax(0,1fr); }
+    aside section { position:static; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>法小智 · <span id="mode-title">类案检索与研究</span> <span class="pill">阶段 2-6 验收界面</span></h1>
+  <div class="bar" id="statusbar"></div>
+  <div class="row" style="margin-top:6px">
+    <button class="ghost" data-tab="research" id="mode-research">类案检索与研究</button>
+    <button class="ghost" data-tab="consult" id="mode-consult">法律咨询</button>
+    <button class="ghost" data-tab="contract" id="mode-contract">合同审查</button>
+    <span class="meta">切换模块会新开一个会话（三个模块各自独立）</span>
+  </div>
+  <div class="notice" id="notice" hidden></div>
+</header>
+
+<main>
+  <div id="research-panel">
+    <section>
+      <h2>① 议题与检索条件</h2>
+      <textarea id="topic" rows="2" placeholder="例如：设备质量存在瑕疵时，买受人能否主张解除合同？"></textarea>
+      <div class="grid2" style="margin-top:8px">
+        <input id="cause" placeholder="案由（可选）" />
+        <input id="level" placeholder="法院层级，如 中级及以上（可选）" />
+        <input id="region" placeholder="地域（可选）" />
+        <input id="since" placeholder="裁判日期起，如 2023-01-01（可选）" />
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btn-start">开始研究</button>
+        <label class="meta"><input type="checkbox" id="force-resume" style="width:auto" /> 续跑上次任务</label>
+        <span class="meta" id="hint"></span>
+      </div>
+    </section>
+
+    <section>
+      <h2>② 进度（阶段级，不推送正文 token）</h2>
+      <ol class="phases" id="phases"></ol>
+      <div id="log">等待开始…</div>
+      <div id="degrade-panel" hidden></div>
+      <div class="row" style="margin-top:8px">
+        <span class="pill" id="gate-count">引用：通过 0 / 拦截 0</span>
+        <span class="pill" id="progress-count"></span>
+      </div>
+    </section>
+
+    <section>
+      <h2>③ 候选池与样本确认 <span class="meta" id="sample-state"></span> <span class="pill" id="selected-count"></span></h2>
+      <div class="meta" id="supplement-bar"></div>
+      <div id="conflict-panel" hidden></div>
+      <div id="candidates"><span class="meta">尚未检索。</span></div>
+      <div class="row" style="margin-top:8px">
+        <button id="btn-confirm" disabled>确认样本</button>
+        <button class="ghost" id="btn-all">全选</button>
+        <button class="ghost" id="btn-none">全不选</button>
+        <button class="ghost" id="btn-supplement">补充检索</button>
+        <span class="meta">已预选你的材料与前 5 篇。≥2 篇才能生成综合结论；<b>选得越多，逐案提炼越慢、花费越高</b>（建议 3–8 篇）</span>
+      </div>
+    </section>
+
+    <section id="consult-panel" hidden>
+      <h2>法律咨询 <span class="pill" id="consult-rounds">追问：第 0 轮 / 最多 3 轮</span></h2>
+      <textarea id="consult-question" rows="3" placeholder="例如：租客拖欠房租两个月，我能不能直接换锁？"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="btn-consult-ask">提问</button>
+        <span class="meta">追问最多 3 轮；你已经问过的问题可以继续问，不受限制</span>
+      </div>
+      <div class="meta" id="consult-materials"></div>
+      <div id="consult-clarify" hidden></div>
+      <div id="consult-answer" style="margin-top:8px"><span class="meta">尚未提问。</span></div>
+      <div class="row" style="margin-top:8px">
+        <button class="ghost" id="btn-consult-memo">导出咨询备忘</button>
+        <span class="meta" id="consult-export-result"></span>
+      </div>
+      <p class="meta">本解答仅作教学、学习与研究参考，<b>不构成正式法律意见，也不可替代执业律师</b>。
+        引用核验、表达边界与追问轮数均由程序判定。</p>
+      <p class="meta">可选：右侧「上传材料」可放背景材料（如合同、判决书），**上传并核验后**会作为咨询依据之一；
+        不传也能用（会自动检索法条与案例）。</p>
+    </section>
+
+    <section id="contract-panel" hidden>
+      <h2>合同审查 <span class="pill" id="contract-state">尚未上传合同</span></h2>
+      <p class="meta">在右侧「上传材料」上传合同（角色选「<b>合同材料</b>」），点「本人已核验」，再在这里确认<b>审查立场</b>。</p>
+
+      <div id="contract-stance" class="card">
+        <b>审查立场（未确认不得开始）</b>
+        <div class="meta" id="contract-parties">尚未识别到合同双方。</div>
+        <div class="row" style="margin-top:6px">
+          <button class="ghost" id="btn-stance-a">我是甲方</button>
+          <button class="ghost" id="btn-stance-b">我是乙方</button>
+          <button class="ghost" id="btn-stance-n">其他（中立）</button>
+          <button id="btn-contract-review">开始审查</button>
+        </div>
+        <div class="meta">立场不同，风险结论会不同；未确认立场时，解析与检索会被代码拒绝。</div>
+      </div>
+
+      <div class="grid2" style="margin-top:8px; grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+        <div>
+          <h2>合同原文（只读，点风险可定位）</h2>
+          <div id="contract-text" style="max-height:420px; overflow:auto; border:1px solid var(--line); border-radius:6px; padding:8px">
+            <span class="meta">尚未上传合同。</span>
+          </div>
+        </div>
+        <div>
+          <h2>风险清单（按等级排序）</h2>
+          <div id="contract-risks"><span class="meta">尚未审查。</span></div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:8px">
+        <button class="ghost" id="btn-contract-export">导出审查报告</button>
+        <span class="meta" id="contract-export-result"></span>
+      </div>
+      <p class="meta">本报告仅作教学、学习与研究参考，<b>不构成正式法律意见，也不可替代执业律师</b>；
+        建议改法仅为示例表述，须经律师审定。<b>未提示风险的条款不等于没有风险</b>。</p>
+    </section>
+
+    <section>
+      <h2>④ 逐案要素</h2>
+      <div id="cases"><span class="meta">未生成。</span></div>
+    </section>
+
+    <section>
+      <h2>⑤ 横向对比矩阵（由代码计算，仅含已确认样本）</h2>
+      <div id="matrix"><span class="meta">未生成。</span></div>
+      <p id="distribution" class="meta"></p>
+    </section>
+
+    <section>
+      <h2>⑥ 综合结论（每条带引用）</h2>
+      <div id="conclusions"><span class="meta">未生成。</span></div>
+      <div id="limitations" class="meta"></div>
+    </section>
+
+    <section>
+      <h2>⑦ 导出</h2>
+      <div class="row">
+        <button id="btn-export">导出 Word</button>
+        <span class="meta">存在未通过核验的引用 / 样本残留 / 越界表述时会被拒绝</span>
+      </div>
+      <div id="export-result" class="meta" style="margin-top:8px"></div>
+    </section>
+  </div>
+
+  <aside>
+    <section>
+      <h2>依据区 / 门禁报告</h2>
+      <div class="tabs">
+        <button class="ghost" data-tab="sources">依据池</button>
+        <button class="ghost" data-tab="gate">门禁报告</button>
+        <button class="ghost" data-tab="upload">上传材料</button>
+      </div>
+      <div id="tab-sources"><span class="meta">尚无依据。</span></div>
+      <div id="tab-gate" hidden><span class="meta">尚无门禁结果。</span></div>
+      <div id="tab-upload" hidden>
+        <input type="file" id="file" accept=".docx,.pdf,.txt,.md" multiple />
+        <div class="row" style="margin-top:6px">
+          <select id="upload-role" style="width:auto">
+            <option value="">角色：自动识别（默认案例）</option>
+            <option value="case">角色：案例材料</option>
+            <option value="statute">角色：法条材料</option>
+          </select>
+          <button id="btn-upload">上传并解析（可多选）</button>
+        </div>
+        <p class="meta">内容仅在本会话临时处理，不会保存；作为引用依据前需确认「本人已核验」。<b>一次可选多个文件</b>，单个失败不影响其他。</p>
+        <div id="upload-result" class="meta"></div>
+        <h2 style="margin-top:8px">材料清单</h2>
+        <div id="material-list"><span class="meta">尚未上传材料。</span></div>
+      </div>
+    </section>
+  </aside>
+</main>
+
+<script>
+const PHASES = ["检索","确认样本","逐案提炼","横向对比","综合","成稿"];
+const state = { sessionId: null, runId: null, mode: "research", candidates: [], sample: null, source: null, selection: {} };
+const $ = (id) => document.getElementById(id);
+
+function api(path, options) {
+  return fetch(path, options).then(async (res) => {
+    const body = await res.json().catch(() => ({}));
+    // 注意：错误状态码可能是 202/200 之外的任何一种，且响应体里带 error 就是失败
+    if (body && body.error) throw new Error(body.error.message || "请求失败");
+    if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
+    return body;
+  });
+}
+function log(text) {
+  const el = $("log");
+  el.textContent = (el.textContent === "等待开始…" ? "" : el.textContent + "\n") + text;
+  el.scrollTop = el.scrollHeight;
+}
+function renderPhases(current) {
+  $("phases").innerHTML = PHASES.map(p => `<li class="${p===current?"on":""}">${p}</li>`).join("");
+}
+
+async function bootstrap() {
+  const info = await api("/api/bootstrap");
+  const m = info.model, g = info.mcp;
+  $("statusbar").innerHTML = [
+    `<span class="pill ${m.is_stub?"bad":"ok"}">模型：${m.provider}${m.is_stub?"（离线 stub）":""}</span>`,
+    `<span class="pill ${g.configured?"ok":"bad"}">北大法宝 MCP：${g.configured?"已配置":"未配置"}</span>`,
+    `<span class="pill ${info.policy.allow_synthetic?"bad":"ok"}">演示模式：${info.policy.allow_synthetic?"开":"关"}</span>`,
+    `<span class="pill">免责声明已启用</span>`,
+  ].join("");
+  if (info.policy.allow_synthetic) {
+    $("notice").hidden = false;
+    $("notice").textContent = "⚠ 演示模式：当前引用的是合成夹具数据，不是真实检索结果。本模式下导出会被明确标注。";
+  }
+  // 2-3：本地依据库状态（只看统计，不展示正文与地址）
+  try {
+    const lib = await api("/api/library");
+    $("statusbar").insertAdjacentHTML(
+      "beforeend",
+      `<span class="pill">本地依据库：可引用 ${lib.entries_citable}｜线索 ${lib.entries_clue}</span>`,
+    );
+  } catch (_) { /* 依据库不可用不影响主流程 */ }
+}
+
+function remember() {
+  try { localStorage.setItem("fxz.session", JSON.stringify({ sid: state.sessionId, run: state.runId, mode: state.mode })); } catch (_) {}
+}
+async function ensureSession() {
+  if (state.sessionId) return state.sessionId;
+  const saved = (() => { try { return JSON.parse(localStorage.getItem("fxz.session") || "null"); } catch (_) { return null; } })();
+  // 2-5：本地记住的模式优先（两个模块各自独立会话）
+  if (saved?.mode === "consult" || saved?.mode === "research") { state.mode = saved.mode; applyMode(); }
+  if (saved?.sid && (!saved.mode || saved.mode === state.mode)) {
+    try {
+      const snap = await api(`/api/session/${saved.sid}/state`);
+      if (snap.branch && snap.branch !== state.mode) throw new Error("branch mismatch");
+      state.sessionId = saved.sid; state.runId = snap.run_id || saved.run;
+      log("已恢复上次的会话与结果（服务未重启）");
+      renderPhases(snap.phase); await refresh();
+      if (snap.status === "awaiting_checkpoint") $("btn-confirm").disabled = false;
+      return state.sessionId;
+    } catch (_) { /* 会话已随重启释放，下面新建会话 */ }
+  }
+  // 修复（2-4 验收实测）：旧存档不得让页面停在「无会话」状态，
+  // 否则上传/提交会落到 /api/session/null/... 返回 404（界面表现为「没反应」）。
+  const res = await api("/api/session", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ branch: state.mode }) });
+  state.sessionId = res.session_id; remember();
+  if (res.queued) log("当前会话已排队（同时会话达上限）。");
+  // 旧任务仍可按存档续跑（可选，不阻断新会话）
+  if (saved?.run) {
+    const box = document.createElement("div");
+    box.className = "card";
+    box.innerHTML = `<b>检测到上次的研究任务（服务重启后内存已释放）</b>
+      <div class="meta">可按存档续跑：已完成的步骤不会重跑，材料原文不会恢复（安全优先）。</div>
+      <button id="btn-recover" style="margin-top:6px">恢复上次研究</button>`;
+    $("log").innerHTML = "";
+    $("log").appendChild(box);
+    $("btn-recover").onclick = async () => {
+      const r = await api(`/api/runs/${saved.run}/resume`, { method:"POST", headers:{"Content-Type":"application/json"}, body:"{}" });
+      state.sessionId = r.session_id; state.runId = r.run_id; remember();
+      log("已按存档恢复，正在重建结果…");
+      openStream();
+      setTimeout(refresh, 1200);
+    };
+  }
+  return state.sessionId;
+}
+
+let pollTimer = null;
+function startPolling() {
+  if (pollTimer) return;
+  // SSE 只是加速；即使事件流断开，也用轮询保证界面能持续更新
+  pollTimer = setInterval(() => { refresh().catch(() => {}); }, 2500);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+function openStream() {
+  startPolling();
+  const es = new EventSource(`/api/session/${state.sessionId}/events`);
+  es.addEventListener("meta", (e) => {
+    const d = JSON.parse(e.data);
+    state.runId = d.run_id; remember();
+    if (d.warning) { $("notice").hidden = false; $("notice").textContent = d.warning; }
+    log(`会话已建立（模型：${d.model.provider}）`);
+  });
+  es.addEventListener("phase", (e) => { const d = JSON.parse(e.data); renderPhases(d.name); log(`阶段：${d.name}`); refresh(); });
+  es.addEventListener("tool", (e) => { const d = JSON.parse(e.data); log(`工具 ${d.tool} → ${d.status}（${d.sources_returned} 条）`); refresh(); });
+  es.addEventListener("gate", (e) => {
+    const d = JSON.parse(e.data);
+    $("gate-count").textContent = `引用：通过 ${d.accepted} / 拦截 ${d.rejected}｜越界表述 ${d.guard_hits}`;
+    log(`门禁：通过 ${d.accepted}，拦截 ${d.rejected}，覆盖率 ${(d.coverage*100).toFixed(0)}%`);
+    refresh();
+  });
+  es.addEventListener("clarify", (e) => {
+    const d = JSON.parse(e.data);
+    log(`第 ${d.rounds_used} 轮 / 最多 ${d.max_rounds} 轮追问`);
+    refresh();
+  });
+  es.addEventListener("degrade", (e) => {
+    const d = JSON.parse(e.data);
+    log(`⚠ ${d.step}｜${d.status}（${d.error_kind || "未分类"}）${d.retryable ? "｜可重试" : ""}`);
+    refresh();
+  });
+  es.addEventListener("retry", (e) => {
+    const d = JSON.parse(e.data);
+    log(`↻ 第 ${d.attempt}/${d.max_attempts} 次重试，从「${d.step}」继续（已完成步骤不重跑）`);
+    refresh();
+  });
+  es.addEventListener("progress", (e) => {
+    const d = JSON.parse(e.data);
+    if (d.detail) log(d.detail);
+    if (d.total) $("progress-count").textContent = `${d.phase || ""} ${d.done}/${d.total}`;
+  });
+  es.addEventListener("checkpoint_reached", (e) => {
+    const d = JSON.parse(e.data);
+    log(`⏸ 到达人工确认点：${d.kind}（等你操作）`);
+    $("btn-confirm").disabled = false;
+    refresh();
+  });
+  es.addEventListener("done", async (e) => {
+    const d = JSON.parse(e.data);
+    log(`✔ 完成：候选 ${d.summary.candidates}，确认样本 ${d.summary.confirmed}，矩阵 ${d.summary.matrix_rows} 行`);
+    $("btn-confirm").disabled = true;
+    es.close();
+    stopPolling();
+    await refresh();
+    if (d.export_blockers?.length) log("当前不可导出：" + d.export_blockers.join("；"));
+  });
+  es.addEventListener("error", (e) => {
+    try { const d = JSON.parse(e.data); log(`✖ 错误：${d.error.code} — ${d.error.message}`); } catch (_) { log("✖ 流结束或网络中断"); }
+    es.close();
+  });
+}
+
+async function start() {
+  await ensureSession();
+  if (!state.sessionId) {
+    log("✖ 会话尚未建立（可能是上一次的会话已随服务重启释放）。请刷新页面后再试。");
+    throw new Error("会话未建立，请刷新页面后重试");
+  }
+  const text = $("topic").value.trim();
+  if (!text) { alert("请先输入议题"); return; }
+  $("log").textContent = "";
+  log("已提交，正在建立连接…（若 10 秒内无进度，请把这句话截图给我）");
+  const conditions = { cause:$("cause").value, level:$("level").value, region:$("region").value, since:$("since").value };
+  openStream();
+  if ($("force-resume").checked) {
+    const res = await api(`/api/session/${state.sessionId}/resume`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ run_id: state.runId }) });
+    state.runId = res.run_id; remember();
+    log("已按存档续跑（已完成的步骤不会重跑）");
+    return;
+  }
+  const payload = { text, conditions };
+  const res = await api(`/api/session/${state.sessionId}/message`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+  state.runId = res.run_id; remember();
+  $("btn-confirm").disabled = true;
+  startPolling();
+}
+
+async function confirmSample() {
+  const confirmed = state.candidates.filter(c => state.selection[c.source_id]).map(c => c.source_id);
+  const excluded = state.candidates.filter(c => !state.selection[c.source_id]).map(c => c.source_id);
+  if (confirmed.length > 10 && !confirm(`你选了 ${confirmed.length} 篇。逐案提炼需要逐篇调用模型，会比较慢、花费也更高。\n\n建议 3–8 篇。确定继续吗？`)) {
+    return;
+  }
+  await api(`/api/session/${state.sessionId}/checkpoint`, {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ kind:"sample_confirm", payload:{ confirmed, excluded } })
+  });
+  $("btn-confirm").disabled = true;
+  log(`已确认样本 ${confirmed.length} 篇，排除 ${excluded.length} 篇`);
+}
+
+async function refresh() {
+  if (!state.sessionId) return;
+  let snap;
+  try { snap = await api(`/api/session/${state.sessionId}/state`); } catch (_) { return; }
+  state.candidates = snap.candidates || [];
+  state.sample = snap.sample;
+  if (snap.run_id) state.runId = snap.run_id;
+  remember();
+  renderPhases(snap.phase);
+  renderCandidates(snap);
+  renderCases(snap.cases);
+  renderMatrix(snap.matrix, snap.distribution);
+  renderConclusions(snap.synthesis);
+  $("limitations").textContent = (snap.limitations || []).join(" ");
+  $("export-result").textContent = snap.export.ready ? "当前可以导出。" : ("当前不可导出：" + snap.export.blockers.join("；"));
+  renderGate(snap);
+  renderSources(snap.sources);
+  renderMaterials(snap);
+  renderConflicts(snap);
+  renderSupplement(snap);
+  renderConsult(snap);
+  renderContract(snap);
+  renderDegradation(snap);
+  if (snap.gate_report) {
+    const r = snap.gate_report;
+    $("gate-count").textContent = `引用：通过 ${r.accepted} / 拦截 ${r.rejected}｜越界表述 ${r.guard_hits}`;
+  }
+}
+
+const STATUS_LABEL = {
+  ok: "已取得完整原文",
+  no_match: "没匹配到",
+  insufficient: "结果不足以支撑结论",
+  abstract_only: "只拿到摘要，不能当引用",
+  parse_error: "返回内容无法识别",
+  interface_error: "接口调用失败",
+};
+
+// 降级与失败面板（2-2 新增）：告知「哪一步、什么原因、能不能重试」
+function renderDegradation(snap) {
+  const panel = $("degrade-panel");
+  const list = snap.degradations || [];
+  const failed = snap.failed_step;
+  if (!list.length && !failed) { panel.hidden = true; panel.innerHTML = ""; return; }
+  panel.hidden = false;
+  const rows = list.map(d => `<div class="card">
+      <b>${d.step}｜${STATUS_LABEL[d.status] || d.status}</b>
+      <div class="meta">工具：${d.tool}${d.error_kind ? "｜原因：" + d.error_kind : ""}｜尝试 ${d.attempts} 次｜${d.retryable ? "可重试" : "重试也无意义（如密钥错）"}</div>
+      <div class="meta">${d.status_text || ""}</div>
+      ${d.endpoint_alias ? `<div class="meta">端点（已脱敏）：${d.endpoint_alias}</div>` : ""}
+    </div>`).join("");
+  const failedBlock = failed
+    ? `<div class="card"><b>本次在「${failed}」这一步没跑完</b>
+        <div class="meta">${snap.failed_reason || ""}</div>
+        <div class="meta">已完成的步骤不会重跑，也不会重复花钱。已点重试 ${snap.retry_count || 0} 次。</div>
+        <button id="btn-retry" style="margin-top:6px">重试（从「${failed}」继续）</button></div>`
+    : "";
+  panel.innerHTML = `<h3 style="margin:4px 0 6px">降级与失败（${list.length} 条）</h3>${failedBlock}${rows}`;
+  const retryBtn = $("btn-retry");
+  if (retryBtn) retryBtn.onclick = () => retryRun().catch(e => log("✖ " + e.message));
+}
+
+async function retryRun() {
+  $("btn-retry").disabled = true;
+  log("正在从失败步骤继续（已完成步骤不会重跑）…");
+  const res = await api(`/api/session/${state.sessionId}/retry`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+  });
+  log(`已提交重试（第 ${res.attempt}/${res.max_attempts} 次），从「${res.resumed_from}」继续`);
+  state.runId = res.run_id; remember();
+  openStream();
+  setTimeout(refresh, 800);
+}
+
+function renderCandidates(snap) {
+  if (!state.candidates.length) {
+    // A12 要求：「没匹配到」与「接口失败」必须显示不同的话（不得混成一句）
+    const ds = snap.degradations || [];
+    const iface = ds.find(d => d.status === "interface_error");
+    const nomatch = ds.find(d => d.status === "no_match");
+    if (iface) {
+      $("candidates").innerHTML = `<div class="card"><b>检索接口调用失败，本次未获得可核验依据。</b>
+        <div class="meta">这不等于「没有相关案例」——只是接口没返回数据。可点上方「重试」。</div>
+        <div class="meta">${iface.status_text || ""}</div></div>`;
+    } else if (nomatch) {
+      $("candidates").innerHTML = `<div class="card"><b>没有匹配到结果</b>
+        <div class="meta">${nomatch.status_text || ""}</div>
+        <div class="meta">这与「接口失败」不同：接口是通的，是条件范围内确实没有匹配。可放宽条件再试。</div></div>`;
+    }
+    return;
+  }
+  const locked = snap.sample?.locked;
+  $("sample-state").textContent = locked ? `已确认 ${snap.sample.confirmed.length} 篇` : "（等待你确认）";
+  const PRESELECT = 5;                       // 默认预选前 5 篇：样本越多，提炼越慢、花费越高
+  // 勾选状态记在 state.selection 里：后台轮询重绘时不清空用户的选择
+  for (const [i, c] of state.candidates.entries()) {
+    // 2-4：用户上传的材料默认全部勾上（材料为主）
+    if (!(c.source_id in state.selection)) state.selection[c.source_id] = c.origin === "user" || i < PRESELECT;
+  }
+  $("candidates").innerHTML = state.candidates.map((c) => {
+    const checked = locked
+      ? (snap.sample.confirmed.includes(c.source_id) ? "checked" : "")
+      : (state.selection[c.source_id] ? "checked" : "");
+    const badges = [
+      `<span class="pill ${c.origin === "user" ? "ok" : ""}">${c.origin_text || c.origin}</span>`,
+      c.origin === "user" && !c.user_verified ? `<span class="pill bad">待核验</span>` : "",
+      c.identifier_missing ? `<span class="pill bad">未识别到案号</span>` : "",
+      c.corroboration === "conflict" ? `<span class="pill bad">来源冲突</span>` : "",
+    ].join(" ");
+    return `<div class="card"><label class="row"><input type="checkbox" style="width:auto" ${checked} ${locked?"disabled":""} value="${c.source_id}" />
+      <b>${c.identifier || c.source_id}</b> ${badges}</label>
+      <div class="meta">${c.title || ""} ${c.court ? "｜"+c.court : ""} ${c.level ? "（"+c.level+"）" : ""} ${c.decided_on ? "｜"+c.decided_on : ""}｜状态 ${c.status}</div></div>`;
+  }).join("");
+  $("btn-confirm").disabled = !!locked || !snap.sample;
+  document.querySelectorAll("#candidates input[type=checkbox]").forEach(box => {
+    box.onchange = () => { state.selection[box.value] = box.checked; updateSelectedCount(); };
+  });
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  if (!state.candidates.length) return;
+  const ids = state.sample?.confirmed ?? Object.keys(state.selection).filter(k => state.selection[k]);
+  const n = (state.sample?.locked ? ids.length : Object.values(state.selection).filter(Boolean).length);
+  $("selected-count").textContent = `已选 ${n} 篇`;
+}
+
+function renderCases(cases) {
+  if (!cases || !cases.length) return;
+  $("cases").innerHTML = cases.map(c => `<div class="card">
+    <b>${c.case_id}</b> <span class="meta">${c.issues ? c.issues.join("；") : ""}</span>
+    <div class="meta">事实：${(c.facts||"").slice(0,160)}</div>
+    <div class="meta">裁判理由：${(c.holding||"").slice(0,160)}</div>
+    <div class="meta">结果：${c.result||"未提取到"}｜立场：${c.stance||"unknown"}</div>
+    <div class="meta">未提取到：${(c.missing_fields||[]).join("；") || "无"}</div></div>`).join("");
+}
+
+function renderMatrix(rows, dist) {
+  if (!rows || !rows.length) return;
+  const cols = Object.keys(rows[0]);
+  $("matrix").innerHTML = `<table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${String(r[c]||"").slice(0,120)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  $("distribution").textContent = dist?.text || "";
+}
+
+function renderConclusions(synthesis) {
+  if (!synthesis || !synthesis.conclusions) return;
+  $("conclusions").innerHTML = synthesis.conclusions.map((c, i) => `<div class="card">
+    <div>${i+1}. ${c.text}</div>
+    ${(c.citations||[]).map(x=>`<div class="cite" data-source="${x.source_id}">↳ 引用：${x.identifier}｜「${(x.quote||"").slice(0,60)}…」</div>`).join("")}
+    <div class="meta">引用编号：${(c.citation_source_ids||[]).join("、")}</div></div>`).join("");
+}
+
+// ============================================================ 材料清单（2-4）
+function renderMaterials(snap) {
+  const list = snap.materials || [];
+  const box = $("material-list");
+  if (!box) return;
+  if (!list.length) { box.innerHTML = `<span class="meta">尚未上传材料。</span>`; return; }
+  box.innerHTML = list.map(m => `<div class="srcline">
+    <b>${m.filename}</b>
+    <span class="pill">${m.role_label}</span>
+    ${m.verified ? '<span class="pill ok">已核验</span>' : (m.superseded ? '<span class="pill">已被取代</span>' : '<span class="pill bad">待核验</span>')}
+    ${m.identifier_missing ? '<span class="pill bad">未识别到案号</span>' : ''}
+    <div class="meta">标识：${m.identifier}（${m.identifier_source === "text" ? "正文抽取" : "文件名"}）｜${m.chars} 字｜${m.version_label}</div>
+    <div class="meta">定位：${(m.locator_index || {}).anchor || "—"}｜角色来源：${m.role_source === "manual" ? "手动指定" : (m.role_source === "detected" ? "自动识别" : "默认")}</div>
+    ${m.superseded_by ? '<div class="meta">已被新版取代，不参与对比与引用</div>' : ''}
+    ${m.fail_reason ? `<div class="meta bad">失败原因：${m.fail_reason}</div>` : ''}
+    <div class="row" style="margin-top:4px">
+      ${!m.superseded && !m.verified ? `<button class="ghost" onclick="verifyMaterial('${m.source_id}')">本人已核验</button>` : ''}
+      ${!m.superseded ? `<select style="width:auto" onchange="changeRole('${m.source_id}', this.value)">
+        <option value="">改角色…</option><option value="case">改为案例</option><option value="statute">改为法条</option></select>` : ''}
+    </div>
+  </div>`).join("");
+}
+
+// ============================================================ 冲突与裁决（2-4）
+function renderConflicts(snap) {
+  const list = snap.conflicts || [];
+  const panel = $("conflict-panel");
+  if (!panel) return;
+  if (!list.length) { panel.hidden = true; panel.innerHTML = ""; return; }
+  panel.hidden = false;
+  panel.innerHTML = `<h3 style="margin:4px 0 6px">来源冲突（${list.length} 处，默认拦住）</h3>`
+    + list.map(c => `<div class="card">
+      <b class="bad">来源冲突</b> <span class="meta">${c.identifier}</span>
+      <div class="meta">同一案号在不同来源间原文不一致：未确认前<b>无法导出</b>，系统不会自动替你选边。</div>
+      ${c.resolved
+        ? '<div class="meta ok">已由人工确认：以我上传的材料为准（导出文档会标注「未经法宝印证」）</div>'
+        : `<button id="btn-resolve-${c.source_id}" style="margin-top:6px">以我上传的材料为准</button>`}
+    </div>`).join("");
+  list.filter(c => !c.resolved).forEach(c => {
+    const btn = $("btn-resolve-" + c.source_id);
+    if (btn) btn.onclick = () => resolveConflict(c.source_id).catch(e => log("✖ " + e.message));
+  });
+}
+
+function renderSupplement(snap) {
+  const s = snap.supplement || {};
+  const used = s.rounds_used || 0, max = s.max_rounds || 2;
+  const btn = $("btn-supplement");
+  if (btn) btn.disabled = used >= max;
+  $("supplement-bar").textContent = s.material_primary
+    ? `本次以你上传的材料为主（默认不检索）；补充检索已用 ${used}/${max} 次。补充来源会单独标注，不改变材料的主体地位。`
+    : `补充检索已用 ${used}/${max} 次；点「补充检索」只做补充，不替换已有来源。`;
+}
+
+async function changeRole(sourceId, role) {
+  if (!role) return;
+  const res = await api(`/api/session/${state.sessionId}/material/${sourceId}/role`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role })
+  });
+  log(`材料角色已改为「${res.role === "case" ? "案例" : "法条"}」；原核验标记已作废，请重新核验`);
+  await refresh();
+}
+
+async function resolveConflict(sourceId) {
+  const res = await api(`/api/session/${state.sessionId}/conflict/resolve`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_id: sourceId, decision: "prefer_user_material" })
+  });
+  log(`已裁决：以我上传的材料为准（${res.identifier || sourceId}）`);
+  await refresh();
+}
+
+async function doSupplement() {
+  $("btn-supplement").disabled = true;
+  try {
+    const res = await api(`/api/session/${state.sessionId}/supplement`, { method: "POST" });
+    log(`补充检索：新增 ${res.sources_added} 条来源（已用 ${res.supplement.rounds_used}/${res.supplement.max_rounds}）`);
+    if (res.conflicts) log(`⚠ 检测到 ${res.conflicts} 处来源冲突，已拦住，需人工确认`);
+    await refresh();
+  } catch (err) {
+    log("✖ 补充检索失败：" + err.message);
+  } finally {
+    $("btn-supplement").disabled = false;
+  }
+}
+
+function renderGate(snap) {
+  const r = snap.gate_report;
+  if (!r) return;
+  const rejected = (r.details||[]).map(d => `<div class="srcline bad">${d.rule}｜${d.reason}${d.identifier ? "（"+d.identifier+"）" : ""}</div>`).join("");
+  const gaps = (snap.gaps||[]).map(g => `<div class="srcline">[${g.kind}] ${g.detail}</div>`).join("");
+  $("tab-gate").innerHTML = `
+    <div class="srcline">通过引用：<b class="ok">${r.accepted}</b>｜拦截：<b class="bad">${r.rejected}</b>｜越界表述：<b class="bad">${r.guard_hits}</b></div>
+    <div class="srcline">证据覆盖率：${(r.coverage*100).toFixed(0)}%</div>
+    ${rejected}
+    <h2 style="margin-top:8px">依据缺口</h2>${gaps || "<span class='meta'>无</span>"}`;
+}
+
+function renderSources(sources) {
+  if (!sources || !sources.length) return;
+  $("tab-sources").innerHTML = sources.map(s => `<div class="srcline">
+    <b>${s.identifier}</b> <span class="${s.status==="ok"?"ok":"bad"}">${s.status}</span>
+    <div class="meta">${s.kind}｜${s.origin}${s.synthetic?"（合成夹具）":""}${s.uri?`｜<a href="${s.uri}" target="_blank">来源</a>`:""}</div>
+    ${s.corroboration_text ? `<div class="meta ${s.corroboration==="conflict"?"bad":"ok"}">印证：${s.corroboration_text}${s.local_hit?"｜本地命中":""}</div>` : ""}
+    <div class="meta">${s.quote ? String(s.quote).slice(0,120)+"…" : (s.note || s.status_text || "")}</div>
+    ${s.kind==="user_material" && !s.user_verified ? `<button class="ghost" onclick="verifyMaterial('${s.source_id}')">本人已核验</button>` : ""}
+  </div>`).join("");
+}
+
+async function verifyMaterial(sourceId) {
+  const res = await api(`/api/session/${state.sessionId}/material/${sourceId}/verify`, { method:"POST" });
+  log("材料已标记为本人核验");
+  if (res.export_blockers?.length) log("仍不可导出：" + res.export_blockers.join("；"));
+  await refresh();
+}
+
+async function doExport() {
+  try {
+    const res = await api(`/api/session/${state.sessionId}/export`, { method:"POST", headers:{"Content-Type":"application/json"}, body:"{}" });
+    $("export-result").innerHTML = `已导出：<a href="${res.download_url}" target="_blank">${res.filename}</a>`;
+    log("导出成功");
+  } catch (err) {
+    $("export-result").textContent = "导出被拒绝：" + err.message;
+    log("导出被拒绝：" + err.message);
+  }
+}
+
+async function doUpload() {
+  const files = Array.from($("file").files || []);
+  if (!files.length) { alert("请选择文件（可一次多选）"); return; }
+  const form = new FormData();
+  files.forEach(f => form.append("files", f));
+  if ($("upload-role").value) form.append("role", $("upload-role").value);
+  try {
+    await ensureSession();
+    if (!state.sessionId) throw new Error("会话未建立，请刷新页面后重试");
+    const res = await api(`/api/session/${state.sessionId}/upload`, { method:"POST", body: form });
+    const ok = (res.materials || []).length;
+    const bad = (res.rejected || []);
+    $("upload-result").innerHTML = `成功 ${ok} 个`
+      + (bad.length ? `，被拒 ${bad.length} 个：` + bad.map(r => `${r.filename}（${r.message || r.error}）`).join("；") : "");
+    log(`材料已解析：成功 ${ok}，被拒 ${bad.length}`);
+    await refresh();
+  } catch (err) {
+    $("upload-result").textContent = "上传失败：" + err.message;
+  }
+}
+
+// ---------------------------------------------------------------- 2-5 法律咨询
+
+function applyMode() {
+  const consult = state.mode === "consult";
+  const contract = state.mode === "contract";
+  const research = $("research-panel");
+  if (research) research.hidden = consult || contract;
+  const cpanel = $("consult-panel");
+  if (cpanel) cpanel.hidden = !consult;
+  const kpanel = $("contract-panel");
+  if (kpanel) kpanel.hidden = !contract;
+  $("mode-title").textContent = contract
+    ? "合同审查"
+    : (consult ? "法律咨询" : "类案检索与研究");
+  const flags = [["mode-research", !consult && !contract], ["mode-consult", consult], ["mode-contract", contract]];
+  flags.forEach(([id, on]) => { if ($(id)) $(id).style.fontWeight = on ? "600" : "normal"; });
+}
+
+function switchMode(mode) {
+  if (state.mode === mode && state.sessionId) return;
+  state.mode = mode;
+  state.sessionId = null;
+  state.runId = null;
+  try { localStorage.removeItem("fxz.session"); } catch (_) {}
+  applyMode();
+  $("log").innerHTML = "等待开始…";
+  ensureSession().then(() => refresh()).catch(e => log("✖ " + e.message));
+}
+
+async function askConsult() {
+  const text = $("consult-question").value.trim();
+  if (!text) { alert("请先输入你的问题"); return; }
+  await ensureSession();
+  $("consult-clarify").hidden = true;
+  $("consult-answer").innerHTML = '<span class="meta">正在处理…</span>';
+  $("consult-export-result").textContent = "";
+  $("log").innerHTML = "";
+  openStream();
+  const res = await api(`/api/session/${state.sessionId}/message`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+  });
+  state.runId = res.run_id || state.runId; remember();
+  startPolling();
+}
+
+async function answerClarify() {
+  const text = $("consult-reply").value.trim();
+  if (!text) { alert("请先填写补充的事实（一句话即可）"); return; }
+  await api(`/api/session/${state.sessionId}/consult/answer`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ facts: text }),
+  });
+  $("consult-clarify").hidden = true;
+  $("consult-answer").innerHTML = '<span class="meta">正在处理…</span>';
+  startPolling();
+}
+
+async function exportConsultMemo() {
+  try {
+    const res = await api(`/api/session/${state.sessionId}/consult/export`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    $("consult-export-result").innerHTML = `已导出：<a href="${res.download_url}" target="_blank">${res.filename}</a>`;
+  } catch (err) {
+    $("consult-export-result").textContent = "导出被拒绝：" + err.message;
+  }
+}
+
+function renderConsult(snap) {
+  if (!snap || snap.branch !== "consult") return;
+  const c = snap.consult || {};
+  const rounds = c.rounds || 0;
+  const max = c.max_rounds || 3;
+  $("consult-rounds").textContent = `追问：第 ${rounds} 轮 / 最多 ${max} 轮`;
+
+  // 当前会作为依据的用户材料（已核验的才算）
+  const mats = (snap.materials || []);
+  const usable = mats.filter(m => m.verified).length;
+  if (mats.length) {
+    $("consult-materials").textContent = usable
+      ? `本次会使用你上传的 ${usable} 份材料作为依据`
+      : `你上传了 ${mats.length} 份材料，但都还没核验——未核验的材料不会被引用`;
+  } else {
+    $("consult-materials").textContent = "";
+  }
+
+  const asked = c.asked || [];
+  if (c.awaiting && asked.length) {
+    $("consult-clarify").hidden = false;
+    $("consult-clarify").innerHTML = `<div class="card">
+      <b>为了把事实弄清楚，我需要确认（第 ${rounds} 轮 / 最多 ${max} 轮）：</b>
+      ${asked.slice(-max).map(q => `<div class="meta">· ${q}</div>`).join("")}
+      <textarea id="consult-reply" rows="2" style="margin-top:6px" placeholder="一句话回答即可；实在不知道就写「不确定」"></textarea>
+      <button id="btn-consult-reply" style="margin-top:6px">提交补充</button>
+      <div class="meta">到第 ${max} 轮后不再追问，会按现有信息作答并写明假设。</div></div>`;
+    $("btn-consult-reply").onclick = () => answerClarify().catch(e => log("✖ " + e.message));
+  }
+
+  const answer = c.answer;
+  if (!answer) return;
+  const passed = c.passed || [];
+  const conclusions = (answer.conclusions || []).filter(x => passed.includes(x.text));
+  let html = "";
+  if (conclusions.length) {
+    html += conclusions.map((x, i) => `<div class="card"><b>${i + 1}. ${x.text}</b>`
+      + (x.citations || []).map(ct => `<div class="cite" data-source="${ct.source_id}">↳ 引用：${ct.identifier}｜「${String(ct.quote || "").slice(0, 60)}…」</div>`).join("")
+      + `</div>`).join("");
+  } else {
+    html += `<div class="card"><b class="bad">本次未产出可引用依据支撑的结论</b>
+      <div class="meta">${answer.insufficient || "检索无匹配，或引用未通过核验。"}</div></div>`;
+  }
+  if ((answer.uncertainties || []).length) {
+    html += `<div class="card"><b>不确定与风险</b>${answer.uncertainties.map(x => `<div class="meta">· ${x}</div>`).join("")}</div>`;
+  }
+  if ((answer.next_steps || []).length) {
+    html += `<div class="card"><b>建议的下一步</b>${answer.next_steps.map(x => `<div class="meta">· ${x}</div>`).join("")}</div>`;
+  }
+  html += `<div class="meta">本解答仅作教学、学习与研究参考，不构成正式法律意见，也不可替代执业律师。</div>`;
+  $("consult-answer").innerHTML = html;
+}
+
+// ---------------------------------------------------------------- 2-6 合同审查
+
+function esc(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+const RISK_KIND = { illegal: "违法", commercial: "商业不利", wording: "措辞不清" };
+const RISK_LEVEL = { high: "高", medium: "中", low: "低" };
+
+async function startContractReview() {
+  await ensureSession();
+  $("contract-export-result").textContent = "";
+  $("log").innerHTML = "";
+  openStream();
+  try {
+    const res = await api(`/api/session/${state.sessionId}/contract/review`, { method: "POST" });
+    state.runId = res.run_id || state.runId;
+    remember();
+    startPolling();
+  } catch (err) {
+    log("✖ 发起失败：" + err.message);
+    $("notice").hidden = false;
+    $("notice").textContent = "发起失败：" + err.message;
+  }
+}
+
+async function chooseStance(value) {
+  try {
+    await api(`/api/session/${state.sessionId}/checkpoint`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "stance_confirm", payload: { stance: value } }),
+    });
+    log("审查立场已确认，继续…");
+    startPolling();
+  } catch (err) {
+    log("✖ 立场确认失败：" + err.message);
+  }
+}
+
+async function exportContractReport() {
+  try {
+    const res = await api(`/api/session/${state.sessionId}/contract/export`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    $("contract-export-result").innerHTML =
+      `已导出：<a href="${res.download_url}" target="_blank">${res.filename}</a>`;
+  } catch (err) {
+    $("contract-export-result").textContent = "导出被拒绝：" + err.message;
+  }
+}
+
+function renderContract(snap) {
+  if (!snap || snap.branch !== "contract") return;
+  const c = snap.contract || {};
+  const risks = c.risks || [];
+  $("contract-state").textContent = c.filename
+    ? `${c.filename}${c.stance ? "｜立场已确认" : "｜待确认立场"}`
+    : "尚未上传合同";
+  const parties = c.parties || {};
+  $("contract-parties").textContent = (parties.party_a || parties.party_b)
+    ? `识别到：甲方 ${parties.party_a || "（未识别）"}｜乙方 ${parties.party_b || "（未识别）"}`
+    : "尚未识别到合同双方。";
+
+  const text = c.text || "";
+  if (text) {
+    const marks = risks.filter((r) => r.locateOk && r.start >= 0).sort((a, b) => a.start - b.start);
+    let html = "";
+    let cursor = 0;
+    for (const r of marks) {
+      if (r.start < cursor) continue;
+      html += esc(text.slice(cursor, r.start));
+      html += `<mark class="rk" data-risk="${r.riskId}" style="background:#fef08a">${esc(text.slice(r.start, r.end))}</mark>`;
+      cursor = r.end;
+    }
+    html += esc(text.slice(cursor));
+    $("contract-text").innerHTML = `<pre style="white-space:pre-wrap;margin:0;font:inherit">${html}</pre>`;
+  }
+
+  if (!risks.length) {
+    $("contract-risks").innerHTML = '<span class="meta">尚未审查。</span>';
+    return;
+  }
+  const order = { high: 0, medium: 1, low: 2 };
+  const ranked = [...risks].sort((a, b) => (order[a.level] ?? 9) - (order[b.level] ?? 9));
+  $("contract-risks").innerHTML = ranked.map((r) => `<div class="card" id="risk-${r.riskId}">
+      <b>[${RISK_LEVEL[r.level] || r.level}] ${RISK_KIND[r.kind] || r.kind}　${esc(r.clauseHeading || r.clauseId || "")}</b>
+      <div>${esc(r.issue)}</div>
+      <div class="meta">${r.locateOk ? "原文：「" + esc(String(r.anchorText).slice(0, 60)) + "…」" : "⚠ 未能定位到原文，请人工核对"}</div>
+      ${(r.basis || []).length
+        ? (r.basisStatus === "verified"
+            ? (r.basis || []).map((b) => `<div class="cite">依据：${esc(b.identifier)}｜「${esc(String(b.quote).slice(0, 50))}…」</div>`).join("")
+            : '<div class="meta bad">⚠ 该条依据未通过引用核验，已降级为「提示性风险」</div>')
+        : '<div class="meta bad">⚠ 未找到直接依据（提示性风险，非无风险）</div>'}
+      ${r.suggestion ? `<div class="meta">建议改法（示例，须经律师审定）：${esc(r.suggestion)}</div>` : ""}
+    </div>`).join("");
+
+  $("contract-risks").querySelectorAll(".card").forEach((card) => {
+    card.onclick = () => {
+      const id = card.id.replace("risk-", "");
+      const mark = document.querySelector(`mark[data-risk="${id}"]`);
+      if (mark) mark.scrollIntoView({ block: "center" });
+    };
+  });
+  document.querySelectorAll("mark.rk").forEach((mark) => {
+    mark.onclick = () => {
+      const el = document.getElementById("risk-" + mark.dataset.risk);
+      if (el) el.scrollIntoView({ block: "center" });
+    };
+  });
+}
+
+document.querySelectorAll(".tabs button").forEach(btn => btn.onclick = () => {
+  ["sources","gate","upload"].forEach(t => { $("tab-"+t).hidden = t !== btn.dataset.tab; });
+});
+$("btn-start").onclick = () => {
+  $("btn-start").disabled = true;
+  log("已点击「开始研究」，正在提交…");
+  start().catch(e => {
+    log("✖ 发起失败：" + e.message);
+    $("notice").hidden = false;
+    $("notice").textContent = "发起失败：" + e.message;
+  }).finally(() => { $("btn-start").disabled = false; });
+};
+$("btn-confirm").onclick = () => confirmSample().catch(e => log("✖ " + e.message));
+$("btn-all").onclick = () => document.querySelectorAll("#candidates input[type=checkbox]").forEach(b => { if (!b.disabled) { b.checked = true; state.selection[b.value] = true; } }), updateSelectedCount();
+$("btn-none").onclick = () => document.querySelectorAll("#candidates input[type=checkbox]").forEach(b => { if (!b.disabled) { b.checked = false; state.selection[b.value] = false; } }), updateSelectedCount();
+$("btn-export").onclick = doExport;
+$("btn-upload").onclick = doUpload;
+$("btn-supplement").onclick = () => doSupplement();
+$("mode-research").onclick = () => switchMode("research");
+$("mode-consult").onclick = () => switchMode("consult");
+$("mode-contract").onclick = () => switchMode("contract");
+$("btn-contract-review").onclick = () => startContractReview();
+$("btn-stance-a").onclick = () => chooseStance("party_a");
+$("btn-stance-b").onclick = () => chooseStance("party_b");
+$("btn-stance-n").onclick = () => chooseStance("neutral");
+$("btn-contract-export").onclick = () => exportContractReport();
+$("btn-consult-ask").onclick = () => askConsult().catch(e => { $("consult-answer").textContent = "提问失败：" + e.message; });
+$("btn-consult-memo").onclick = () => exportConsultMemo();
+applyMode();
+
+bootstrap().then(ensureSession).catch(e => log("✖ " + e.message));
+</script>
+</body>
+</html>

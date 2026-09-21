@@ -1,0 +1,41 @@
+[project]
+name = "legal-xiaozhi"
+version = "0.1.0"
+description = "法小智 · 法律类案检索与研究 Agent（Harness 工程，阶段 2-1）"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "openai>=1.40",
+    "python-docx>=1.1",
+    "pypdf>=4.2",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+# 今天新增的文件里有较多"整句 SQL / 中文长句"，硬折行反而更难读；
+# 只对这四豁免**纯行长规则 E501**，其余规则（含 F/I/UP/B）仍然全开。
+[tool.ruff.lint.per-file-ignores]
+"app/statutes.py" = ["E501"]
+"app/server.py" = ["E501"]
+"app/auth/core.py" = ["E501"]
+"tests/test_auth.py" = ["E501"]

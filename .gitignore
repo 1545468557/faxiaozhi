@@ -1,0 +1,27 @@
+# Secrets and runtime data
+.env*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.sqlite*
+*.db
+*.log
+*.bak
+/data/
+/runs/
+/exports/
+/uploads/
+# Dependencies and generated output
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.next/
+.vinext/
+.wrangler/
+dist/
+*.tsbuildinfo
+.DS_Store

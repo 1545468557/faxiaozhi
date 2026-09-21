@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "法小智 · 本地依据库条目文件",
+  "schema_version": 1,
+  "description": "一个文件对应一个标识（案号 / 法规名+条号）；revisions 保留同标识的历史版本。语料位于 data/library/（不提交仓库）。",
+  "type": "object",
+  "required": ["schema_version", "entry"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "revisions": {"type": "array", "items": {"type": "object"}},
+    "entry": {
+      "type": "object",
+      "required": ["entry_id", "content_type", "identifier", "text", "zone", "origin"],
+      "properties": {
+        "entry_id": {
+          "type": "string",
+          "description": "content_type + ':' + normalize(identifier)"
+        },
+        "content_type": {"type": "string", "enum": ["case", "statute", "history"]},
+        "identifier": {"type": "string", "description": "案号 或 法规名+条号"},
+        "title": {"type": "string"},
+        "text": {"type": "string", "description": "逐字原文（核验基准）；仅摘要条目允许为空"},
+        "meta": {
+          "type": "object",
+          "properties": {
+            "court": {"type": ["string", "null"]},
+            "level": {"type": ["string", "null"]},
+            "region": {"type": ["string", "null"]},
+            "decided_on": {"type": ["string", "null"]},
+            "effective_status": {"type": ["string", "null"]},
+            "applicable_from": {"type": ["string", "null"]},
+            "applicable_to": {"type": ["string", "null"]},
+            "uri": {"type": ["string", "null"]},
+            "status": {"type": ["string", "null"]},
+            "abstract_only": {"type": "boolean"}
+          }
+        },
+        "zone": {"type": "string", "enum": ["citable", "clue"]},
+        "origin": {"type": "string", "enum": ["mcp", "imported"]},
+        "fetched_at": {"type": "string"},
+        "imported_at": {"type": "string"},
+        "source_run_id": {"type": ["string", "null"]},
+        "content_hash": {"type": "string"},
+        "last_used_at": {"type": "string"},
+        "schema_version": {"type": "integer", "const": 1}
+      }
+    }
+  }
+}

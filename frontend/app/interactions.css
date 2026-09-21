@@ -1,0 +1,88 @@
+/* Action-led motion: a small lift, clear focus and immediate press feedback. */
+.fh-home .fh-tool {
+  transition: translate 240ms cubic-bezier(.2,.7,.2,1), background 180ms, box-shadow 240ms;
+}
+.fh-home .fh-composer {
+  transition: border-color 200ms, box-shadow 260ms;
+}
+.fh-home .fh-composer:focus-within {
+  box-shadow: 0 0 0 4px #0b766b12, 0 8px 24px #264c3d09;
+}
+.fh-home :is(.fh-button, .fh-composer-tabs button, .fh-examples button),
+.fs-header :is(.fs-start, .fs-menu-button),
+.workspace-page .workbench :is(.primary, .secondary, .risk-tabs > button, .mobile-switch button) {
+  transition: scale 120ms ease-out, background 180ms, border-color 180ms, color 180ms, box-shadow 180ms;
+}
+.fh-home :is(.fh-button, .fh-composer-tabs button, .fh-examples button):active:not(:disabled),
+.fs-header :is(.fs-start, .fs-menu-button):active,
+.workspace-page .workbench :is(.primary, .secondary, .risk-tabs > button, .mobile-switch button):active:not(:disabled) {
+  scale: .98;
+}
+.fh-home :is(.fh-tool-action, .fh-text-link, .fh-button, .fh-examples button) svg,
+.fs-header .fs-start svg {
+  transition: translate 220ms cubic-bezier(.2,.7,.2,1);
+}
+.fs-header .fs-desktop-nav a::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 3px;
+  background: var(--fh-teal);
+  border-radius: 3px 3px 0 0;
+  scale: 0 1;
+  transform-origin: left;
+  transition: scale 220ms cubic-bezier(.2,.7,.2,1);
+}
+.fs-header .fs-desktop-nav a[aria-current="page"]::after,
+.fs-header .fs-desktop-nav a:focus-visible::after { scale: 1; }
+.workspace-page .workbench :is(select, textarea) {
+  transition: border-color 180ms, background 180ms, box-shadow 220ms;
+}
+.workspace-page .workbench .case-card {
+  transition: background 180ms, border-color 180ms, box-shadow 220ms;
+}
+.workspace-page .workbench .case-card:focus-within {
+  border-color: #548e79;
+  box-shadow: 0 0 0 3px #0b766b0d;
+}
+.workspace-page .workbench .case-card.selected { box-shadow: inset 3px 0 0 #0b766b; }
+.workspace-page .workbench .case-card [role="checkbox"] {
+  transition: background 160ms, border-color 160ms, scale 120ms;
+}
+.workspace-page .workbench .case-card [role="checkbox"]:active { scale: .92; }
+.workspace-page .workbench button[aria-busy="true"] { cursor: progress; }
+.workspace-page .workbench button[aria-busy="true"] > svg:first-child {
+  animation: fx-busy 900ms linear infinite;
+}
+@keyframes fx-busy { to { rotate: 1turn; } }
+
+@media (hover: hover) and (pointer: fine) {
+  .fh-home .fh-tool:hover {
+    translate: 0 -3px;
+    box-shadow: 0 8px 20px #264c3d09;
+  }
+  .fh-home .fh-tool:hover .fh-tool-action svg,
+  .fh-home .fh-examples button:hover svg,
+  .fs-header .fs-start:hover svg { translate: 3px -3px; }
+  .fh-home .fh-text-link:hover svg,
+  .fh-home .fh-button:hover:not(:disabled) svg { translate: 3px 0; }
+  .fs-header .fs-desktop-nav a:hover::after { scale: 1; }
+  .workspace-page .workbench .case-card:hover { border-color: #81aa98; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fh-home :is(.fh-tool, .fh-composer, .fh-button, .fh-composer-tabs button, .fh-examples button),
+  .fh-home :is(.fh-tool-action, .fh-text-link, .fh-button, .fh-examples button) svg,
+  .fs-header :is(.fs-start, .fs-menu-button),
+  .fs-header .fs-start svg,
+  .workspace-page .workbench :is(.primary, .secondary, select, textarea, .case-card, .risk-tabs > button, .mobile-switch button, [role="checkbox"]) {
+    transition: none !important;
+    translate: none !important;
+    scale: none !important;
+  }
+  .fs-header .fs-desktop-nav a::after { transition: none !important; }
+  .workspace-page .workbench button[aria-busy="true"] > svg:first-child {
+    animation: none !important;
+    rotate: none !important;
+  }
+}
