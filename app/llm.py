@@ -355,13 +355,23 @@ def _stub_consult_answer(prompt: str, scenario: str, allow_overreach: bool = Tru
                 ],
             }
         )
+    basis_status = "direct" if conclusions else "insufficient"
+    insufficient = "" if conclusions else "未检索到直接规定；建议放宽检索条件或补充事实后重试。"
+    # 复现「引用能过门禁，但仍承认没有直接条文」：邻近材料被写成正式结论。
+    if scenario == "no_direct_basis":
+        for item in conclusions:
+            identifier = str(item["citations"][0]["identifier"])
+            item["text"] = f"可参照{identifier}的一般框架分析本次碰撞责任，并按过错分担损失。"
+            item["applicability"] = "direct"
+        basis_status = "direct"
+        insufficient = "没有直接条文可适用于该碰撞责任，以上内容属于邻近规则的类推。"
     payload: dict[str, Any] = {
         "conclusions": conclusions,
         "uncertainties": ["（离线 stub）示例不确定项"] if conclusions else [],
         "next_steps": ["（离线 stub）示例下一步"],
-        "insufficient": (
-            "" if conclusions else "未检索到直接规定；建议放宽检索条件或补充事实后重试。"
-        ),
+        "insufficient": insufficient,
+        "basis_status": basis_status,
+        "reference_notes": [],
     }
     validate(CONSULT_ANSWER_SCHEMA, payload)
     return json.dumps(payload, ensure_ascii=False)

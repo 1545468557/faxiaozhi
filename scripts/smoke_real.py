@@ -784,6 +784,11 @@ CONSULT_QUESTIONS: dict[str, str] = {
     ),
     "C2": "租客欠我房租，我能换锁吗",
     "C3": "在轨航天器之间发生碰撞，我国法律对责任承担是怎么规定的？",
+    # consult-10：与 C3 一样预期依据不足，且不得导出正式意见。
+    "C4": (
+        "深海海底矿产资源勘探作业中，两艘无人潜水器因导航误差发生碰撞导致设备损毁，"
+        "在仅适用我国国内民商事法律且无国际条约可引的前提下，责任如何分担？请给出具体法条号。"
+    ),
 }
 
 
@@ -860,6 +865,7 @@ async def _consult_flow(cfg: Any, args: Any) -> dict[str, Any]:
         "max_rounds": state.get("max_rounds", 3),
         "turns": turns,
         "status": state.get("status"),
+        "evidence_basis": state.get("evidence_basis"),
         "conclusions_passed": len(state.get("passed") or []),
         "insufficient": str(answer.get("insufficient") or ""),
         "gate": gate,
@@ -875,8 +881,18 @@ async def _consult_flow(cfg: Any, args: Any) -> dict[str, Any]:
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print()
-    if state.get("status") == "insufficient" and scene == "C3":
-        print("✅ C3 通过：检索不到时如实说明，未编造法条")
+    no_hit = scene in {"C3", "C4"}
+    if no_hit:
+        marked = state.get("status") == "insufficient" or state.get("evidence_basis") == "insufficient"
+        blocked = not export.get("exported")
+        if marked and blocked and summary["conclusions_passed"] == 0:
+            print(f"✅ {scene} 通过：依据不足，未把类推作为正式意见导出")
+        else:
+            print(
+                f"⚠ {scene} 未按依据不足处理（status={state.get('status')} "
+                f"evidence={state.get('evidence_basis')} passed={summary['conclusions_passed']} "
+                f"exported={export.get('exported')}）"
+            )
     elif state.get("status") == "answered":
         print(f"✅ {scene} 通过：产出 {len(state.get('passed') or [])} 条带引用结论")
     else:
@@ -1035,8 +1051,8 @@ def main() -> int:
     parser.add_argument(
         "--consult-scene",
         default="C2",
-        choices=["C1", "C2", "C3"],
-        help="咨询冒烟场景：C1 事实完整 / C2 事实不足 / C3 检索不到依据",
+        choices=["C1", "C2", "C3", "C4"],
+        help="咨询冒烟场景：C1 事实完整 / C2 事实不足 / C3 航天器碰撞（consult-09） / C4 深海潜水器碰撞（consult-10）",
     )
     parser.add_argument("--contract-file", default=None, help="合同审查冒烟：合同文件路径")
     parser.add_argument(

@@ -238,23 +238,38 @@ def build_consult_answer_prompt(
         "2. **不得承诺结果**：不得出现「一定能赢」「百分百」「保证胜诉」这类表述；",
         "3. **不得说可以替代律师**，不得生成可直接提交法院的文书；",
         "4. 不得把个案说成「司法实践普遍认为」「各地法院均…」，也不得给出胜诉率类的伪指标；",
-        "5. 检索不到直接依据时：conclusions 留空，把说明写进 insufficient"
-        "（例如「未检索到直接规定」并给放宽建议），**绝对不得凭记忆编造法条或案号**；",
-        "6. uncertainties[]：写风险与不确定（含上面列出的假设）；不得省略；",
-        "7. next_steps[]：给可执行的下一步（如补强证据、书面催告、咨询执业律师）；",
-        "8. 「来源 / 印证」由系统标注，不得自行编造或改写；",
-        "9. 只有 uncertainties[]、next_steps[]、citation_source_ids[] 的元素是字符串；"
+        "5. 先判断有没有**可直接适用**的依据，并写入 basis_status（只能是 direct 或 insufficient）。"
+        "直接适用 = 该法条或案例的规范对象就是用户所问的法律关系和行为"
+        "（房屋租赁换锁、违法解除劳动合同、定金、民间借贷利息、离婚分割婚后共同房产，都有直接依据）。"
+        "邻近领域、一般原则、或必须类推/类比才能套上的材料，**不是**直接依据："
+        "例如用船舶碰撞、民用航空或一般侵权去回答在轨航天器碰撞、深海潜水器碰撞。",
+        "6. basis_status=direct 时：conclusions 只写这些直接依据支持的结论；"
+        "insufficient 用空字符串；个别细节写进 uncertainties，不要写进 insufficient。"
+        "basis_status=insufficient 时：",
+        "（a）conclusions 必须是空数组，禁止输出多点正式意见；",
+        "（b）insufficient 必须以「依据不足：未检索到可直接适用的规定」开头；",
+        "（c）若仍说明邻近框架，写入 reference_notes，每一条以「仅供参考」开头，不得写成结论；",
+        "（d）next_steps 优先说明还要检索哪类专门规则、哪个法域或主管部门规定，不要分配确定性责任；",
+        "（e）**绝对不得凭记忆编造法条或案号**，也不得因为检索到了「有点相关」的条文就改填 direct。",
+        "7. uncertainties[]：写风险与不确定（含上面列出的假设）；不得省略；",
+        "8. next_steps[]：basis_status=direct 时给可执行的下一步（如补强证据、书面催告、咨询执业律师）；",
+        "9. 「来源 / 印证」由系统标注，不得自行编造或改写；",
+        "10. 只有 uncertainties[]、next_steps[]、citation_source_ids[]、reference_notes[] 的元素是字符串；"
         "conclusions[]、citations[] 的元素必须是对象。禁止 conclusions: [\"一段结论\"]，"
         "也禁止用 content、conclusion 等字段替代 text；",
-        "10. 输出 JSON（json 格式），必须包含 conclusions、uncertainties、next_steps、insufficient 四个字段。"
-        "insufficient 是字符串，无缺口时用空字符串；无结论时 conclusions 用空数组；",
-        "11. 优先回答最关键的 3–5 条结论，引用取足够支持该结论的简短原文，避免重复抄写大段材料；",
+        "11. 输出 JSON（json 格式），必须包含 conclusions、uncertainties、next_steps、insufficient、"
+        "basis_status、reference_notes。"
+        "无直接依据时 conclusions 用空数组；有直接依据时 insufficient 用空字符串，reference_notes 用空数组；",
+        "12. 只有 basis_status=direct 时，才优先回答最关键的 3–5 条结论；"
+        "引用取足够支持该结论的简短原文，避免重复抄写大段材料。"
+        "basis_status=insufficient 时不要为了凑满条数而类推；",
         '格式示例（仅说明结构，占位文字不能作为真实引用）：'
         '{"conclusions":[{"text":"有依据支持的结论正文",'
         '"citation_source_ids":["材料中的真实来源编号"],'
         '"citations":[{"source_id":"同一真实来源编号","identifier":"材料中的真实引用标识",'
         '"quote":"该来源中逐字连续出现的原文"}]}],'
-        '"uncertainties":["尚需确认的事实"],"next_steps":["可执行的下一步"],"insufficient":""}',
+        '"uncertainties":["尚需确认的事实"],"next_steps":["可执行的下一步"],'
+        '"insufficient":"","basis_status":"direct","reference_notes":[]}',
     ]
     return "\n".join(lines)
 

@@ -311,8 +311,12 @@ class Session:
         区别只在于：咨询没有矩阵与样本锁，取而代之的是“必须已经给出解答”。
         """
         reasons: list[str] = []
-        if not (self.consult or {}).get("answer"):
+        state = self.consult or {}
+        if not state.get("answer"):
             reasons.append("尚未生成咨询解答，无法导出。")
+        elif state.get("evidence_basis") == "insufficient":
+            # 引用能逐字对上，也不等于有可直接适用的规定。类推不得导出为正式意见。
+            reasons.append("依据不足：未检索到可直接适用的规定，不能作为正式咨询意见导出。")
         return reasons + self._shared_export_blockers()
 
     def _contract_export_blockers(self) -> list[str]:
