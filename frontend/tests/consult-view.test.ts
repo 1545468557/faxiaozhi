@@ -140,6 +140,24 @@ describe("四块解答", () => {
     expect(sections.nextSteps).toHaveLength(2);
   });
 
+  it("依据不足时类推只出现在仅供参考，不进入正式结论", () => {
+    const sections = answerSections(
+      {
+        basis_status: "insufficient",
+        conclusions: [],
+        insufficient: "依据不足：未检索到可直接适用的规定。",
+        reference_notes: ["可类推适用船舶碰撞规则。"],
+        uncertainties: [],
+        next_steps: ["检索专门规则"],
+      },
+      [],
+    );
+    expect(sections.evidenceInsufficient).toBe(true);
+    expect(sections.conclusions).toHaveLength(0);
+    expect(sections.referenceNotes).toEqual(["仅供参考：可类推适用船舶碰撞规则。"]);
+    expect(sections.insufficient).toContain("未检索到可直接适用的规定");
+  });
+
   it("insufficient 会并入「不确定与风险」并优先展示", () => {
     const withInsufficient = answerSections(
       { ...answer, insufficient: "本次未检索到足够依据，不能据此判断。" },

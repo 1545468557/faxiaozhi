@@ -266,6 +266,8 @@ export type ConsultAnswerSnapshot = {
   uncertainties?: string[];
   next_steps?: string[];
   insufficient?: string;
+  basis_status?: string;
+  reference_notes?: string[];
 };
 
 export type ConsultSnapshot = {
@@ -285,6 +287,8 @@ export type ConsultSnapshot = {
   answer?: ConsultAnswerSnapshot;
   /** 通过门禁的结论原文（红线 4：只展示这批） */
   passed?: string[];
+  /** direct = 有可直接适用的依据；insufficient = 依据不足，不得导出正式意见 */
+  evidence_basis?: string;
 };
 
 // ---------------------------------------------------------------- 合同审查

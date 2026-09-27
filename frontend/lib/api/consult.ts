@@ -31,6 +31,9 @@ export type ConsultAnswer = {
   uncertainties?: string[];
   next_steps?: string[];
   insufficient?: string;
+  /** direct = 有可直接适用的依据；insufficient = 依据不足，类推仅供参考 */
+  basis_status?: string;
+  reference_notes?: string[];
 };
 
 export type ConsultState = {
@@ -106,6 +109,12 @@ export function splitAnswer(
   return { shown, degraded };
 }
 
+function referenceLabel(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  return trimmed.startsWith("仅供参考") ? trimmed : `仅供参考：${trimmed}`;
+}
+
 /** 解答四块（结论 / 引用 / 不确定与风险 / 建议的下一步） */
 export function answerSections(answer: ConsultAnswer | undefined, passed: string[] | undefined) {
   const { shown, degraded } = splitAnswer(answer, passed);
@@ -126,6 +135,8 @@ export function answerSections(answer: ConsultAnswer | undefined, passed: string
     uncertainties: (answer?.uncertainties ?? []).filter(item => String(item).trim()),
     nextSteps: (answer?.next_steps ?? []).filter(item => String(item).trim()),
     insufficient: (answer?.insufficient ?? "").trim(),
+    referenceNotes: (answer?.reference_notes ?? []).map(item => referenceLabel(String(item))).filter(Boolean),
+    evidenceInsufficient: answer?.basis_status === "insufficient",
     hasAnswer: Boolean(answer),
     /** 结论区是否为空：空的时候必须解释原因，而不是留白 */
     empty: shown.length === 0,

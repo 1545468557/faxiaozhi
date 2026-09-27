@@ -191,6 +191,26 @@ describe("咨询整页的失败与恢复", () => {
     expect(await screen.findByText(/以下回答基于这些尚待确认的情况：假设书面合同尚未到期/)).toBeTruthy();
   });
 
+  it("没有直接依据时标成依据不足，类推不作为正式结论", async () => {
+    show(snapshot({
+      consult: {
+        status: "insufficient",
+        evidence_basis: "insufficient",
+        answer: {
+          basis_status: "insufficient",
+          conclusions: [],
+          insufficient: "依据不足：未检索到可直接适用的规定。",
+          reference_notes: ["仅供参考：可类推适用海商法船舶碰撞规则。"],
+        },
+        passed: [],
+      },
+    }));
+    expect(await screen.findByText("依据不足")).toBeTruthy();
+    expect(screen.getByText("仅供参考：可类推适用海商法船舶碰撞规则。")).toBeTruthy();
+    expect(screen.getByText("以下为邻近规则或类推，仅供参考，不是正式结论。")).toBeTruthy();
+    expect(screen.queryByText("无通过核验的结论")).toBeNull();
+  });
+
   it("真正的引用未通过仍展示依据不足，不误变成服务失败", async () => {
     show(snapshot({ consult: { status: "insufficient", answer: { conclusions: [{ text: "被门禁拒绝的结论" }] }, passed: [] } }));
     expect(await screen.findByText("无通过核验的结论")).toBeTruthy();

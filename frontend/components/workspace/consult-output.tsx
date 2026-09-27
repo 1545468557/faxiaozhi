@@ -200,10 +200,22 @@ export function ConsultAnswerBlocks({
               </li>
             ))}
           </ol>
+        ) : sections.evidenceInsufficient ? (
+          <p>依据不足：未检索到可直接适用的规定，本次不作为正式结论。</p>
         ) : (
           <p className="fzx-mini">
             本次没有通过引用核验的结论，因此不做结论展示（未通过核验的内容不作为结论）。
           </p>
+        )}
+        {sections.referenceNotes.length > 0 && (
+          <div aria-label="仅供参考">
+            <p className="fzx-mini">以下为邻近规则或类推，仅供参考，不是正式结论。</p>
+            <ul>
+              {sections.referenceNotes.map(item => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
         )}
       </section>
 

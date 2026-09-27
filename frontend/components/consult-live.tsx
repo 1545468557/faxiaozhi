@@ -564,7 +564,7 @@ export function ConsultLive() {
                 <span>02</span>回答
               </div>
               <span className="light-badge">
-                {busy || running ? "正在回答" : failed ? "回答未完成" : sections.conclusions.length ? `${sections.conclusions.length} 条结论` : sections.hasAnswer ? "无通过核验的结论" : clarify.awaiting ? "待补充信息" : "等待提问"}
+                {busy || running ? "正在回答" : failed ? "回答未完成" : sections.evidenceInsufficient ? "依据不足" : sections.conclusions.length ? `${sections.conclusions.length} 条结论` : sections.hasAnswer ? "无通过核验的结论" : clarify.awaiting ? "待补充信息" : "等待提问"}
               </span>
             </div>
 

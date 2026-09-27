@@ -20,7 +20,9 @@ from app.gates.expression import ExpressionGuard
 from app.gates.runner import apply_gates
 from app.knowledge import KnowledgeBase
 from app.models import Source, Status
-from app.prompts import build_consult_identify_prompt
+from app.assemble import BRANCH_PROMPT
+from app.prompts import build_consult_answer_prompt, build_consult_identify_prompt
+from app.workflows.consult import evidence_is_insufficient, settle_consult_evidence
 from app.render.docx import document_text
 from app.server import app
 from app.session import Session
@@ -202,7 +204,11 @@ async def test_cs14_no_match_yields_explicit_insufficient_not_fabrication():
     answer = session.consult["answer"]
     assert answer["conclusions"] == [], "没有依据就不许产出结论"
     assert "未检索到" in str(answer.get("insufficient") or "")
+    assert "依据不足" in str(answer.get("insufficient") or "")
     assert session.consult["status"] == "insufficient"
+    assert session.consult.get("evidence_basis") == "insufficient"
+    assert not session.export_ready()
+    assert any("不能作为正式咨询意见导出" in item for item in session.export_blockers())
 
 
 async def test_cs15_interface_error_is_not_reported_as_no_law():
@@ -473,3 +479,122 @@ async def test_cs35_uploaded_and_verified_material_survives_and_can_be_cited():
     session = await run_consult(LONG_Q, session=session)
     assert source.source_id in session.source_pool, "已核验的用户材料不得在开新问题时被清掉"
     assert session.source_pool[source.source_id].is_user_material is True
+
+
+# ==================================================================== 无直接依据不得硬答
+
+
+def test_cs36_answer_prompt_separates_direct_basis_from_analogy():
+    prompt = build_consult_answer_prompt(Session(branch="consult"))
+    assert "basis_status" in prompt
+    assert "依据不足：未检索到可直接适用的规定" in prompt
+    assert "仅供参考" in prompt
+    assert "在轨航天器" in prompt
+    assert "依据不足" in BRANCH_PROMPT["consult"]
+    assert "仅供参考" in BRANCH_PROMPT["consult"]
+
+
+def test_cs37_direct_answer_is_not_treated_as_insufficient():
+    """有直接依据的正常结论，不能因为「没有直接规定可以做某事」被整篇降级。"""
+    answer = {
+        "basis_status": "direct",
+        "conclusions": [{
+            "text": "法律没有直接规定出租人可以私自更换门锁，应依租赁合同处理。",
+            "applicability": "direct",
+        }],
+        "insufficient": "",
+        "uncertainties": ["催告是否到达尚不确定"],
+        "next_steps": ["书面催告"],
+        "reference_notes": [],
+    }
+    assert evidence_is_insufficient(answer) is False
+
+    side_gap = dict(answer)
+    side_gap["basis_status"] = "direct"
+    side_gap["insufficient"] = "关于损失计算的细节未检索到直接规定，不影响解除合同的主结论。"
+    assert evidence_is_insufficient(side_gap) is False
+
+
+def test_cs38_admission_of_no_direct_rule_demotes_even_if_marked_direct():
+    answer = {
+        "basis_status": "direct",
+        "conclusions": [{
+            "text": "可参照海商法船舶碰撞规则，按过错分担损失。",
+            "citation_source_ids": ["s1"],
+        }],
+        "insufficient": "没有直接条文可适用于在轨航天器碰撞。",
+        "uncertainties": ["管辖尚未确定"],
+        "next_steps": ["检索外空活动专门规则"],
+        "reference_notes": [],
+    }
+    assert evidence_is_insufficient(answer) is True
+    session = Session(branch="consult")
+    session.structured_output = {
+        "conclusions": list(answer["conclusions"]),
+        "_passed_conclusions": ["可参照海商法船舶碰撞规则，按过错分担损失。"],
+    }
+    assert settle_consult_evidence(session, answer) is True
+    assert answer["conclusions"] == []
+    assert answer["basis_status"] == "insufficient"
+    assert str(answer["insufficient"]).startswith("依据不足：未检索到可直接适用的规定")
+    assert answer["reference_notes"]
+    assert all(item.startswith("仅供参考") for item in answer["reference_notes"])
+    assert session.consult["evidence_basis"] == "insufficient"
+    assert session.structured_output["_passed_conclusions"] == []
+    assert any("不能作为正式咨询意见导出" in item for item in session.export_blockers()) is False
+    session.consult["answer"] = answer
+    assert any("不能作为正式咨询意见导出" in item for item in session.export_blockers())
+
+
+def test_cs39_analogy_sentence_is_reference_only_and_direct_conclusion_stays():
+    answer = {
+        "basis_status": "direct",
+        "conclusions": [
+            {"text": "承租人违约时，出租人可以依约解除合同。"},
+            {"text": "深海设备碰撞可类推适用船舶碰撞规则。"},
+        ],
+        "insufficient": "",
+        "next_steps": ["保留合同"],
+        "reference_notes": [],
+    }
+    session = Session(branch="consult")
+    session.structured_output = {
+        "conclusions": list(answer["conclusions"]),
+        "_passed_conclusions": [item["text"] for item in answer["conclusions"]],
+    }
+    assert settle_consult_evidence(session, answer) is False
+    assert [item["text"] for item in answer["conclusions"]] == ["承租人违约时，出租人可以依约解除合同。"]
+    assert session.structured_output["_passed_conclusions"] == ["承租人违约时，出租人可以依约解除合同。"]
+    assert any(item.startswith("仅供参考") and "类推适用" in item for item in answer["reference_notes"])
+    assert session.consult["evidence_basis"] == "direct"
+
+
+async def test_cs40_passing_citations_still_cannot_export_an_analogical_opinion():
+    """离线复现 consult-09/10：邻近依据的引用能过门禁，但承认没有直接条文。
+
+    真实重跑需要本机 DeepSeek 与法宝配置（CI 无密钥时不会跑）：
+      python scripts/smoke_real.py --mode consult --consult-scene C3 --yes
+      python scripts/smoke_real.py --mode consult --consult-scene C4 --yes
+    C3 为在轨航天器碰撞（consult-09），C4 为深海潜水器碰撞（consult-10）。
+    通过标准：status=insufficient、正式结论为 0、export.exported 为 false。
+    """
+    session = await run_consult(LONG_Q, scenario="no_direct_basis")
+    answer = session.consult["answer"]
+    assert session.gate_report is not None and session.gate_report.accepted >= 1
+    assert session.consult["status"] == "insufficient"
+    assert session.consult.get("evidence_basis") == "insufficient"
+    assert session.consult.get("passed") == []
+    assert answer["conclusions"] == []
+    assert str(answer.get("insufficient") or "").startswith("依据不足：未检索到可直接适用的规定")
+    assert answer.get("reference_notes")
+    assert all(str(item).startswith("仅供参考") for item in answer["reference_notes"])
+    assert not session.export_ready()
+    blockers = "；".join(session.export_blockers())
+    assert "不能作为正式咨询意见导出" in blockers
+
+    from app.llm import ToolCall
+    from app.tools import dispatch_tool
+
+    exported = dispatch_tool(session, ToolCall(id="e-no-direct", name="export_docx", arguments={}))
+    assert exported.status is not Status.OK
+    assert "依据不足" in exported.detail
