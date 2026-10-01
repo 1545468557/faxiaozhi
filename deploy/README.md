@@ -20,7 +20,7 @@ chmod 600 .env.production
 openssl rand -hex 32
 ```
 
-把生成的随机值填入 `.env.production` 的 `GUEST_COOKIE_SECRET`，并填 `SITE_HOST`、`ALLOWED_HOSTS`、模型密钥和北大法宝 MCP 配置。两个 Host 填相同的正式域名，不带协议或路径。密钥只保留在服务器环境文件，不提交 Git。`AUTH_REQUIRE_LOGIN=1` 和 `AUTH_GUEST_MODE=1` 必须同时保留，这样网站无登录页且访客数据分开。
+把生成的随机值填入 `.env.production` 的 `GUEST_COOKIE_SECRET`，并填 `SITE_HOST`、`ALLOWED_HOSTS`、模型密钥和北大法宝 MCP 配置。两个 Host 填相同的域名，不带协议或路径。密钥只保留在服务器环境文件，不提交 Git。`AUTH_REQUIRE_LOGIN=1` 和 `AUTH_GUEST_MODE=1` 必须同时保留，这样网站无登录页且访客数据分开。生产模板先把每位访客限制为每日 5 次、全站每日 30 次；模型与 MCP 费用另计，观察账单后再调高。
 
 从原部署电脑制作法规库一致性快照：
 
