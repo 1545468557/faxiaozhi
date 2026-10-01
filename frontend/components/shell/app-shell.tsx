@@ -14,9 +14,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, FileText, LogIn, Sparkles, PanelLeft, Search, Settings, User, Clock, X } from "lucide-react";
+import { BookOpen, FileText, Sparkles, PanelLeft, Search, Settings, User, Clock, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { authApi, type AuthUser } from "@/lib/api/auth";
 import { sessions, type V3SessionBrief } from "@/lib/api/v3";
 import { useSessionState } from "@/components/workspace-session";
 
@@ -37,24 +36,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isAskPage = pathname === "/";
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
-  /**
-   * 登录态：Cookie 是 HttpOnly（前端读不到），所以只能问后端 `/api/auth/me`。
-   * `undefined` = 还没问到（先不判），`null` = 没登录。
-   */
-  const [user, setUser] = useSessionState<AuthUser | null | undefined>("auth:current-user", undefined);
   useEffect(() => {
-    let alive = true;
-    void authApi
-      .me()
-      .then(found => alive && setUser(found))
-      .catch(() => { if (alive) setUser(previous => previous === undefined ? null : previous); });
-    return () => {
-      alive = false;
-    };
-  }, [pathname, setUser]);
-
-  useEffect(() => {
-    if (!isAskPage || !historyOpen || !user) return;
+    if (!isAskPage || !historyOpen) return;
     const controller = new AbortController();
     void sessions(controller.signal).then(data => {
       if (controller.signal.aborted) return;
@@ -64,7 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (!controller.signal.aborted) setHistoryStatus("历史对话暂时加载失败，请关闭后重新打开。");
     });
     return () => controller.abort();
-  }, [isAskPage, historyOpen, user]);
+  }, [isAskPage, historyOpen]);
 
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
@@ -73,27 +56,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [setExpanded]);
-
-  // 未登录：功能页一律挡住（**权限判断在后端**，这里只是不给入口；直接调接口同样会被拒）
-  if (user === null) {
-    return (
-      <div className="v2-app" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-        <main className="v2-main" id="main-content" style={{ display: "grid", placeItems: "center", minHeight: "100dvh" }}>
-          <div className="ct-card" style={{ maxWidth: 460 }}>
-            <h1 style={{ fontSize: 20, margin: "0 0 8px" }}>请先登录</h1>
-            <p className="ct-mini" style={{ marginBottom: 14 }}>
-              法小智现在需要账号才能使用：你问过的、研究过的、审过的都会记在你自己名下，别人看不到。
-              还没有账号就用邀请码注册。
-            </p>
-            <Link className="ct-btn ct-btn-primary" href="/login">
-              <LogIn size={15} aria-hidden="true" />
-              去登录 / 注册
-            </Link>
-          </div>
-        </main>
-      </div>
-    );
-  }
 
   return (
     <div className="v2-app v2-nav-shell" data-expanded={expanded}>
@@ -116,10 +78,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="nav-account">
-          {user ? <>
-            <Link href="/settings" aria-label="设置" title="设置"><Settings size={24} strokeWidth={1.7} /><span className="nav-label">设置</span></Link>
-            <Link href="/me" aria-label="我的账号" title={user.username}><span className="nav-avatar">{user.username.slice(0, 1)}</span><span className="nav-label">{user.username}</span></Link>
-          </> : <div className="nav-account-loading" role="status" aria-label="正在确认账号"><span /><span /></div>}
+          <Link href="/settings" aria-label="设置" title="设置"><Settings size={24} strokeWidth={1.7} /><span className="nav-label">设置</span></Link>
         </div>
       </aside>
       {isAskPage && historyOpen && <>
@@ -132,7 +91,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span>{row.title || "未命名对话"}</span><small>{new Date(row.updated_at * 1000).toLocaleDateString("zh-CN")}</small>
             </a>)}
           </div>
-          <p className="nav-history-note">当前展示本机历史记录，账号间的数据隔离仍在完善。</p>
+          <p className="nav-history-note">当前浏览器会保留访客身份；共用此浏览器的人可能看到这些对话。</p>
         </aside>
       </>}
       <main className="v2-main nav-main" id="main-content">

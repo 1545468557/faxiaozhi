@@ -183,7 +183,7 @@ async def test_all_resume_routes_preserve_original_workflow(api, monkeypatch, br
     session = server.STORE.create(branch=branch)
     session.run_id = f"route-{branch}-{route}"
     session.mark_failed("测试步骤", "离线失败")
-    state = {"workflow": WORKFLOW_FOR_BRANCH[branch], "args": {}}
+    state = {"run_id": session.run_id, "workflow": WORKFLOW_FOR_BRANCH[branch], "args": {}}
     (get_config().runs_dir / f"{session.run_id}.json").write_text(json.dumps(state), encoding="utf-8")
     recorded = []
 
@@ -202,7 +202,7 @@ async def test_all_resume_routes_preserve_original_workflow(api, monkeypatch, br
 
 
 async def test_resume_rejects_branch_override(api):
-    state = {"workflow": "legal-contract", "args": {"contract": True}}
+    state = {"run_id": "branch-mismatch", "workflow": "legal-contract", "args": {"contract": True}}
     (get_config().runs_dir / "branch-mismatch.json").write_text(json.dumps(state), encoding="utf-8")
     response = await api.post("/api/runs/branch-mismatch/resume", json={"branch": "research"})
     assert response.status_code == 400

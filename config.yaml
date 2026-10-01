@@ -114,7 +114,7 @@ mcp:
     hyperlink:            [PKULAW_URL_HYPERLINK, PKULAW_URL_AGGREGATE]
     law_list:             [PKULAW_URL_STATUTE_KEYWORD]
     case_list:            [PKULAW_URL_CASE_KEYWORD]
-    procuratorate:        [PKULAW_URL_PROSECUTION]
+    procuratorate:        [PKULAW_URL_PROSECUTION, PKULAW_URL_AGGREGATE]
     enforcement:          [PKULAW_URL_ADMIN_ENFORCE]
 
   # 真实工具名（2026-09-17 探针实测；接口改名时只改这里）

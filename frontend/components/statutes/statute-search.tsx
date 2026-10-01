@@ -14,8 +14,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Copy, FileText, Info, Search, X } from "lucide-react";
-import { statutesApi, citationOf, type StatuteDetail, type StatuteHit, type StatutesStatus } from "@/lib/api/statutes";
+import { AlertTriangle, Copy, FileText, Info, Search, Sparkles, X } from "lucide-react";
+import { statutesApi, citationOf, type AgentSearchResult, type AgentStatuteHit, type StatuteDetail, type StatuteHit, type StatutesStatus } from "@/lib/api/statutes";
 
 const STATUS_TONE: Record<string, "ok" | "warn" | "bad"> = {
   valid: "ok",
@@ -28,9 +28,13 @@ const STATUS_TONE: Record<string, "ok" | "warn" | "bad"> = {
 };
 
 export function StatuteSearch() {
+  const [mode, setMode] = useState<"direct" | "agent">("direct");
   const [query, setQuery] = useState("");
+  const [agentQuestion, setAgentQuestion] = useState("");
+  const [clarification, setClarification] = useState("");
+  const [agentResult, setAgentResult] = useState<AgentSearchResult | null>(null);
   const [includeInvalid, setIncludeInvalid] = useState(false);
-  const [items, setItems] = useState<StatuteHit[]>([]);
+  const [items, setItems] = useState<Array<StatuteHit | AgentStatuteHit>>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -60,7 +64,9 @@ export function StatuteSearch() {
         const result = await statutesApi.search(trimmed, { includeInvalid: withInvalid, limit: 10 });
         setItems(result.items);
         setTotal(result.total);
-        if (result.items.length === 0) setNotice("未找到匹配条文，请检查法规名称和条号，例如“民法典34”或“民法典第三十四条”。也可能是当前法规库尚未收录，或被有效性筛选排除。");
+        if (result.items.length === 0) setNotice(result.stale_exact_title
+          ? "本地只有这部法规的旧版本，现行版本尚未核验入库。可勾选“包含旧版本”查看历史条文，引用前请核对最新原文。"
+          : "未找到匹配条文，请检查法规名称和条号，例如“民法典34”或“民法典第三十四条”。也可能是当前法规库尚未收录，或被有效性筛选排除。");
       } catch (cause) {
         setItems([]);
         setTotal(null);
@@ -71,6 +77,54 @@ export function StatuteSearch() {
     },
     [],
   );
+
+  const runAgent = useCallback(async (text: string, extra = "", skip = false, withInvalid = false) => {
+    if (text.trim().length < 2) {
+      setNotice("请先描述法律问题，至少输入两个字。");
+      return;
+    }
+    setBusy(true);
+    setNotice("");
+    setSearched(false);
+    setDetail(null);
+    try {
+      const result = await statutesApi.agent(text.trim(), {
+        clarification: extra.trim(),
+        skipClarification: skip,
+        includeInvalid: withInvalid,
+      });
+      setAgentResult(result);
+      if (result.status === "completed") {
+        setItems(result.items);
+        setTotal(result.items.length);
+        setNotice(result.notice);
+        setSearched(true);
+      } else {
+        setItems([]);
+        setTotal(null);
+      }
+    } catch (cause) {
+      setAgentResult(null);
+      setItems([]);
+      setTotal(null);
+      setNotice(cause instanceof Error ? cause.message : "智能检索失败，请稍后重试。");
+      setSearched(true);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const switchMode = (next: "direct" | "agent") => {
+    if (busy || next === mode) return;
+    setMode(next);
+    setItems([]);
+    setTotal(null);
+    setSearched(false);
+    setNotice("");
+    setDetail(null);
+    setAgentResult(null);
+    setClarification("");
+  };
 
   /**
    * 打开某份法规的全文。
@@ -108,12 +162,18 @@ export function StatuteSearch() {
       <header className="ct-head">
         <h1>法规查找</h1>
         <p>
-          查法律法规原文。支持直接查某一条：输入「法规名 + 条号」，例如
-          <b> 民法典 577</b>、<b>刑法 第一百二十条之一</b>；也可以只输关键词，例如「押金 退还」。
+          直接查找法规原文，或描述你遇到的问题，由检索 Agent 帮你组织检索词并核对候选条文。
         </p>
       </header>
 
       <section className="ct-card">
+        <div className="sa-modes" role="group" aria-label="选择法规查找方式">
+          <button type="button" className="sa-mode" aria-pressed={mode === "direct"} onClick={() => switchMode("direct")}>精准查条文</button>
+          <button type="button" className="sa-mode" aria-pressed={mode === "agent"} onClick={() => switchMode("agent")}>
+            <Sparkles size={15} aria-hidden="true" />描述问题 · 智能检索
+          </button>
+        </div>
+        {mode === "direct" ? (
         <form
           className="ct-actions"
           style={{ marginTop: 0, alignItems: "stretch" }}
@@ -135,6 +195,43 @@ export function StatuteSearch() {
             {busy ? "正在查…" : "查一下"}
           </button>
         </form>
+        ) : (
+          <form onSubmit={event => { event.preventDefault(); void runAgent(agentQuestion, "", false, includeInvalid); }}>
+            <label className="sa-label" htmlFor="sa-question">描述你的法律问题</label>
+            <textarea
+              id="sa-question"
+              className="ct-input sa-textarea"
+              value={agentQuestion}
+              onChange={event => setAgentQuestion(event.target.value)}
+              maxLength={500}
+              placeholder="例如：公司试用期内辞退我，没有说明理由，可以查哪些规定？"
+            />
+            <div className="ct-actions sa-submit">
+              <p className="ct-mini">只展示检索到的条文原文；是否适用于具体案件仍需核对。</p>
+              <button type="submit" className="ct-btn ct-btn-primary" disabled={busy}>
+                <Search size={15} aria-hidden="true" />{busy ? "正在检索…" : "开始智能检索"}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {mode === "agent" && agentResult?.status === "needs_clarification" && (
+          <form className="sa-clarify" onSubmit={event => { event.preventDefault(); void runAgent(agentQuestion, clarification, false, includeInvalid); }}>
+            <label className="sa-label" htmlFor="sa-clarification">还需要确认：{agentResult.question}</label>
+            <input
+              id="sa-clarification"
+              className="ct-input"
+              value={clarification}
+              onChange={event => setClarification(event.target.value)}
+              maxLength={500}
+              placeholder="补充这一事实；不确定也可以按现有信息继续"
+            />
+            <div className="ct-actions" style={{ marginTop: 12 }}>
+              <button type="submit" className="ct-btn ct-btn-primary" disabled={busy || !clarification.trim()}>补充并检索</button>
+              <button type="button" className="ct-btn ct-btn-ghost" disabled={busy} onClick={() => void runAgent(agentQuestion, "", true, includeInvalid)}>按现有信息继续</button>
+            </div>
+          </form>
+        )}
 
         <div className="ct-actions" style={{ marginTop: 10 }}>
           <label className="ct-mini" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
@@ -143,7 +240,8 @@ export function StatuteSearch() {
               checked={includeInvalid}
               onChange={event => {
                 setIncludeInvalid(event.target.checked);
-                if (searched) void run(query, event.target.checked);
+                if (mode === "direct" && searched) void run(query, event.target.checked);
+                if (mode === "agent" && agentResult?.status === "completed") void runAgent(agentQuestion, clarification, true, event.target.checked);
               }}
             />
             包含已修改 / 已废止的旧条文
@@ -168,6 +266,17 @@ export function StatuteSearch() {
           </p>
         )}
       </section>
+
+      {mode === "agent" && agentResult?.status === "completed" && (
+        <section className="ct-card sa-plan" aria-label="智能检索过程">
+          <h2>检索过程</h2>
+          <p><b>识别的问题：</b>{agentResult.issue}</p>
+          <p><b>检索词：</b>{agentResult.queries.join(" · ") || "无"}</p>
+          {agentResult.applicable_at && <p><b>指定时点：</b>{agentResult.applicable_at}</p>}
+          {agentResult.assumptions.length > 0 && <p><b>待核实：</b>{agentResult.assumptions.join("；")}</p>}
+          {agentResult.mode === "rules" && <p>模型未配置，本次为关键词检索。</p>}
+        </section>
+      )}
 
       {detail && (
         <section className="ct-card" style={{ marginTop: 16 }} ref={detailRef}>
@@ -202,7 +311,7 @@ export function StatuteSearch() {
 
       {searched && items.length > 0 && (
         <section className="ct-card" style={{ marginTop: 16 }}>
-          <h2 style={{ fontSize: 18, marginBottom: 10 }}>找到 {total} 条</h2>
+          <h2 style={{ fontSize: 18, marginBottom: 10 }}>找到 {total} 条{mode === "agent" ? "候选条文" : ""}</h2>
           <ul className="ct-risks" style={{ maxHeight: "none" }}>
             {items.map(item => (
               <li key={`${item.title}-${item.no}`} style={{ marginBottom: 10 }}>
@@ -218,15 +327,20 @@ export function StatuteSearch() {
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
+                  {"source" in item && (
+                    <p className="ct-mini sa-source">
+                      {item.source === "mcp" ? "北大法宝 MCP" : "本地法规库"} · {item.citation_checked ? "来源字段检查通过" : "需人工核对"} · {item.check_note}
+                    </p>
+                  )}
                   <p className="ct-quote" style={{ whiteSpace: "pre-wrap" }}>
                     {item.text}
                   </p>
                   <div className="ct-actions" style={{ marginTop: 10 }}>
-                    <button type="button" className="ct-btn" onClick={() => void copy(item)}>
+                    <button type="button" className="ct-btn" disabled={"citation_checked" in item && !item.citation_checked} onClick={() => void copy(item)}>
                       <Copy size={14} aria-hidden="true" />
                       复制引用
                     </button>
-                    <button
+                    {item.bbbs && <button
                       type="button"
                       className="ct-btn ct-btn-ghost"
                       disabled={openingId === item.bbbs}
@@ -234,7 +348,10 @@ export function StatuteSearch() {
                     >
                       <FileText size={14} aria-hidden="true" />
                       {openingId === item.bbbs ? "正在打开…" : "看这份法规全文"}
-                    </button>
+                    </button>}
+                    {"uri" in item && /^https?:\/\//.test(item.uri) && (
+                      <a className="ct-btn ct-btn-ghost" href={item.uri} target="_blank" rel="noopener noreferrer">查看来源</a>
+                    )}
                   </div>
                 </div>
               </li>

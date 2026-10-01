@@ -170,8 +170,13 @@ def export_docx(session: Session, **args: Any) -> ToolResult:
     filename = safe_filename(str(args.get("filename") or _default_name(session)))
     if not filename.endswith(".docx"):
         filename += ".docx"
-    target: Path = cfg.exports_dir / filename
-    if not target.resolve().is_relative_to(cfg.exports_dir.resolve()):
+    from ..auth import guard
+
+    # 按用户分目录写：导出文件是**用户数据**，全混在一个目录里就会出现
+    # 「A 能列出并下载 B 的报告」（改造前的真实缺陷）。
+    export_dir = guard.current_owner_dir(cfg.exports_dir)
+    target: Path = export_dir / filename
+    if not target.resolve().is_relative_to(export_dir.resolve()):
         raise ApiError("path_escape", "禁止写入导出目录之外的路径。")
     if contract:
         render_contract_report(session, target)

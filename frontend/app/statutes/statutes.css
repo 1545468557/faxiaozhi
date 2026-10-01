@@ -1,0 +1,13 @@
+.sa-modes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--v2-line); padding-bottom: 16px; }
+.sa-mode { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 9px 15px; border: 1px solid var(--v2-line); border-radius: 8px; background: #fff; color: var(--v2-muted); font: inherit; cursor: pointer; }
+.sa-mode[aria-pressed="true"] { border-color: var(--v2-teal); background: #eef7f5; color: var(--v2-teal-deep); font-weight: 600; }
+.sa-mode:focus-visible, .sa-clarify :focus-visible, .sa-textarea:focus-visible { outline: 3px solid #7baf9d; outline-offset: 2px; }
+.sa-label { display: block; margin-bottom: 10px; font-size: 14px; font-weight: 600; }
+.sa-textarea { display: block; width: 100%; min-height: 110px; resize: vertical; line-height: 1.7; }
+.sa-submit { justify-content: space-between; align-items: center; gap: 14px; margin-top: 12px; }
+.sa-clarify { margin-top: 20px; border-top: 1px solid var(--v2-line); padding-top: 20px; }
+.sa-clarify .ct-input { width: 100%; }
+.sa-plan { margin-top: 16px; background: #f5f8f6; }
+.sa-plan p { margin: 6px 0; line-height: 1.7; overflow-wrap: anywhere; }
+.sa-source { margin-bottom: 8px; }
+@media (max-width: 620px) { .sa-submit { align-items: stretch; flex-direction: column; } .sa-submit .ct-btn { width: 100%; } }

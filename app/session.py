@@ -11,6 +11,7 @@ from typing import Any
 from .errors import ApiError
 from .gates.sample import SampleLock
 from .materials import MaterialRecord, MaterialRegistry
+from .auth.guard import ANONYMOUS, current_owner
 from .models import Claim, DegradationRecord, Gap, GateReport, Source, Status
 
 SESSION_ACTIVE = "active"
@@ -22,6 +23,12 @@ SESSION_CLOSED = "closed"
 class Session:
     id: str = field(default_factory=lambda: "s_" + uuid.uuid4().hex[:12])
     branch: str = "research"
+    #: 归属（2026-09-27 隔离改造）：`app.auth.guard.owner_key(user)` 的值，即用户主键字符串。
+    #: 默认 `ANONYMOUS`（`_anonymous`）—— 只在登录门关闭或测试里直接构造时出现，
+    #: 此时所有人共用一个桶，行为与改造前一致。
+    #: 注意：这里**不需要**兼容「改造前的无主会话」，因为旧 `app/` 的会话是纯内存的，
+    #: 进程重启就没了，部署本次改动时不存在需要认领的历史数据。
+    owner: str = ANONYMOUS
     purpose: str | None = None
     foreground: bool = True
     queued: bool = False
@@ -411,6 +418,14 @@ class Session:
         }
 
 
+def _resolve_owner(owner: str | None) -> str:
+    """`None` = 「当前请求的归属」（登录门中间件设的）；显式给了就用给的。
+
+    这样 19 个 `STORE.get()` 调用点一个字都不用改，归属也不会因为漏改某一处而开口子。
+    """
+    return current_owner() if owner is None else owner
+
+
 class SessionStore:
     def __init__(self, max_concurrent: int = 4, ttl_seconds: int = 1800) -> None:
         self._sessions: dict[str, Session] = {}
@@ -437,15 +452,17 @@ class SessionStore:
         session.materials.clear()
         session.material_registry.release()
 
-    def create(self, branch: str = "research", purpose: str | None = None) -> Session:
+    def create(self, branch: str = "research", purpose: str | None = None, owner: str | None = None) -> Session:
+        owner = _resolve_owner(owner)
         self.sweep()
         # 修复（2-4 代操作验收实测缺陷 4）：名额已满时，先回收「最旧的、没在跑任务的」空闲会话。
         # 原来只要未关闭就占名额，而空闲会话要 30 分钟才释放 —— 用户多开几次页面就会把自己锁在门外
         # （表现为「无法开始研究：同时在跑的研究已达上限」，而实际根本没有研究在跑）。
-        if self.active_count() >= self.max_concurrent:
-            self._evict_oldest_idle()
-        session = Session(branch=branch, purpose=purpose)
-        if self.active_count() >= self.max_concurrent:
+        # 2026-09-27 隔离改造：名额与回收都**只在同一归属内**进行，不能回收别人的会话。
+        if self.active_count(owner) >= self.max_concurrent:
+            self._evict_oldest_idle(owner)
+        session = Session(branch=branch, purpose=purpose, owner=owner)
+        if self.active_count(owner) >= self.max_concurrent:
             session.queued = True
         self._sessions[session.id] = session
         return session
@@ -458,12 +475,18 @@ class SessionStore:
             not task.done() for task in getattr(session, "run_tasks", []) if task is not None
         )
 
-    def _evict_oldest_idle(self) -> str | None:
-        """回收最旧的一个空闲会话；一个可回收的都没有时返回 None（名额确实被真实占用）。"""
+    def _evict_oldest_idle(self, owner: str | None = None) -> str | None:
+        """回收最旧的一个空闲会话；一个可回收的都没有时返回 None（名额确实被真实占用）。
+
+        `owner` 给了就只在同一归属内找 —— 绝不因为别人占满名额而把别人的会话踢掉。
+        """
         idle = [
             (session.last_active, sid)
             for sid, session in self._sessions.items()
-            if session.status != SESSION_CLOSED and not session.queued and not self._is_running(session)
+            if session.status != SESSION_CLOSED
+            and not session.queued
+            and not self._is_running(session)
+            and (owner is None or session.owner == owner)
         ]
         if not idle:
             return None
@@ -473,23 +496,47 @@ class SessionStore:
         del self._sessions[sid]
         return sid
 
-    def active_count(self) -> int:
-        return sum(1 for s in self._sessions.values() if s.status != SESSION_CLOSED)
+    def active_count(self, owner: str | None = None) -> int:
+        """在跑的会话数。`owner=None` 统计全部（日志/巡检用），给了就只统计该归属。
 
-    def get(self, session_id: str) -> Session:
+        **`max_concurrent` 的语义是「每人」上限**（2026-09-27 隔离改造）。
+        原来它是全局 4 个 —— 在本机单人使用时没问题，放到公网上就变成
+        「一个人占满名额、其他人排队」。全局总量上限应该在网关 / 反向代理层做，
+        不在这里做（这里也做不到，因为这是个单进程内存表）。
+        """
+        return sum(
+            1
+            for s in self._sessions.values()
+            if s.status != SESSION_CLOSED and (owner is None or s.owner == owner)
+        )
+
+    def get(self, session_id: str, owner: str | None = None) -> Session:
+        """取会话。`owner=None`（默认）解析成**当前请求的归属** —— 见 `guard.current_owner`。
+
+        归属不符一律当作「不存在」：**不要回 403** ——
+        403 等于告诉对方「这个 sid 是真的，只是不属于你」，那本身就是信息泄漏。
+        """
         session = self._sessions.get(session_id)
-        if session is None or session.status == SESSION_CLOSED:
+        if session is None or session.status == SESSION_CLOSED or session.owner != _resolve_owner(owner):
             raise ApiError("session_not_found", "会话不存在或已结束，请重新开始。")
         session.touch()
         return session
+
+    def belongs_to(self, session_id: str, owner: str) -> bool:
+        """该会话存在、未关闭、且属于这个归属。
+
+        供登录门中间件使用：**不抛异常、不 touch**（中间件每个请求都会调，不能有副作用）。
+        """
+        session = self._sessions.get(session_id)
+        return session is not None and session.status != SESSION_CLOSED and session.owner == owner
 
     def close(self, session_id: str) -> None:
         session = self._sessions.pop(session_id, None)
         if session:
             self._release(session)
 
-    def all_sessions(self) -> list[Session]:
-        return list(self._sessions.values())
+    def all_sessions(self, owner: str | None = None) -> list[Session]:
+        return [s for s in self._sessions.values() if owner is None or s.owner == owner]
 
 
 STORE = SessionStore()

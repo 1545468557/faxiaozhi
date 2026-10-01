@@ -188,6 +188,7 @@ def search(user_input: str, *, include_invalid: bool = False, limit: int = 10) -
     conn = _connect()
     try:
         items: list[dict] = []
+        stale_exact_title = False
         if article and name:
             status_filter = "" if include_invalid else " AND s.status_code = 'valid'"
             rows = conn.execute(
@@ -214,9 +215,11 @@ def search(user_input: str, *, include_invalid: bool = False, limit: int = 10) -
             keyword = user_input.strip()
             items = keyword_search(conn, keyword, include_invalid=include_invalid, limit=limit, name=name)
             # 输入恰好就是某部法规的名字（如"劳动合同法"）→ 把这部法排在最前面，便于直接看全文
+            status_filter = "" if include_invalid else " AND status_code = 'valid'"
             strong = conn.execute(
-                """SELECT bbbs, title FROM statutes
-                   WHERE title = ? OR title = ? LIMIT 1""",
+                f"""SELECT bbbs, title FROM statutes
+                   WHERE (title = ? OR title = ?){status_filter}
+                   ORDER BY (status_code = 'valid') DESC, publish_date DESC LIMIT 1""",
                 (name, f"中华人民共和国{name}"),
             ).fetchone()
             if strong is not None:
@@ -230,11 +233,20 @@ def search(user_input: str, *, include_invalid: bool = False, limit: int = 10) -
                 if head is not None:
                     entry = dict(head) | {"rank": 0}
                     items = [entry] + [item for item in items if item["bbbs"] != strong["bbbs"]][: max(0, limit - 1)]
+            elif not include_invalid:
+                stale_exact_title = conn.execute(
+                    """SELECT 1 FROM statutes WHERE (title = ? OR title = ?)
+                       AND status_code != 'valid' LIMIT 1""",
+                    (name, f"中华人民共和国{name}"),
+                ).fetchone() is not None
+                if stale_exact_title:
+                    items = []
 
         return {
             "input": user_input,
             "parsed": {"name": name, "article": article, "keyword": user_input.strip()},
             "data_as_of": data_as_of(conn),
+            "stale_exact_title": stale_exact_title,
             "total": len(items),
             "items": items,
         }
