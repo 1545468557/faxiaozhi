@@ -6,7 +6,8 @@
 
 - 建议先选 Ubuntu 24.04 x86_64、2 核 2 GB、至少 40 GB 系统盘。2 GB 是低成本试运行规格；构建前端时若内存不足，需要添加交换空间或升级到 4 GB。
 - 若选择中国内地节点，公开网站需要先完成 ICP 备案。中国香港节点无需该备案，但内地访问质量可能波动。腾讯云官方[价格总览](https://cloud.tencent.com/document/product/1207/73452)与[备案说明](https://cloud.tencent.com/document/product/243/19630)供购买时核对。
-- 域名的 A 记录指向服务器公网 IP；防火墙开放 80、443 和受限的 SSH 端口。正式环境必须使用域名与 HTTPS，访客 Cookie 设置为 Secure。
+- 有自己的域名时，将 A 记录指向服务器公网 IP。暂时没有域名时，可先用免费地址 `<公网IP>.sslip.io`（例如 `1.2.3.4.sslip.io`）做公开试运行；它会解析到嵌入的 IP，也可以由 Caddy 申请 HTTPS 证书，详见 [sslip.io 说明](https://sslip.io/)。此地址依赖第三方 DNS，长期使用建议换自有域名。
+- 防火墙开放 80、443 和受限的 SSH 端口。公开环境必须使用 HTTPS，访客 Cookie 设置为 Secure。
 - 按 [Docker 官方 Ubuntu 安装指南](https://docs.docker.com/engine/install/ubuntu/)安装 Docker Engine 和 Compose 插件。
 
 ## 第一次发布
