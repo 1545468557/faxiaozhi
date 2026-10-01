@@ -1,0 +1,65 @@
+name: faxiaozhi
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    env_file: ../.env.production
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8010"
+    command: [".venv/bin/python", "-m", "app.server"]
+    volumes:
+      - ../data:/app/data
+      - ../runs:/app/runs
+      - ../exports:/app/exports
+    restart: unless-stopped
+
+  v3:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    env_file: ../.env.production
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8011"
+    command: [".venv/bin/python", "-m", "app_v3.main"]
+    volumes:
+      - ../data:/app/data
+      - ../runs:/app/runs
+      - ../exports:/app/exports
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    env_file: ../.env.production
+    environment:
+      BACKEND_BASE_URL: http://backend:8010
+      V3_BACKEND_BASE_URL: http://v3:8011
+      HOST: 0.0.0.0
+      PORT: "3001"
+    depends_on:
+      - backend
+      - v3
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    env_file: ../.env.production
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

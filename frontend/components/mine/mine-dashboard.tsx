@@ -3,17 +3,16 @@
 /**
  * 「我的」（迭代 3 追加）
  *
- * 现在<b>没有账号体系</b>，所以这一页是"本机工作台"：把你这台电脑上的东西集中到一页。
+ * 本机工作台：把这台电脑上的东西集中到一页。
  * 四个区块都能显示真实数据：
  *   ① 我的会话（三条链路 + 首页快速问答，含"空闲 30 分钟自动结束"的说明，可一键清空本机数据）
  *   ② 我上传的材料（<b>当前会话内</b>；并如实写明原文不落盘）
- *   ③ 我导出的文件（可重新下载；现在列的是<b>本机全部导出</b>，有账号后必须按用户过滤）
+ *   ③ 我导出的文件（可重新下载；列出本机全部导出）
  *   ④ 这台机器的真实使用情况（不含离线演示与测试数据）
- * 末尾一段"登录后可用"，只作说明，<b>不做假入口</b>。
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Download, FileText, FolderOpen, Info, KeyRound, Trash2 } from "lucide-react";
+import { Download, FileText, FolderOpen, Info, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   BRANCH_LABEL,
@@ -98,7 +97,7 @@ export function MineDashboard() {
     <div className="ct-wrap">
       <header className="ct-head">
         <h1>我的</h1>
-        <p>这一页显示你这台电脑上的东西：会话、上传的材料、导出的文件、用量。<b>暂不需要登录</b>；接入账号后这里会变成你自己的记录。</p>
+        <p>这一页显示当前浏览器的会话、上传材料和此访客的导出文件。公开体验时，清除 Cookie 或换设备后无法找回访客历史。</p>
       </header>
 
       {notice && (
@@ -198,8 +197,7 @@ export function MineDashboard() {
               ))}
             </ul>
             <p className="ct-mini" style={{ marginTop: 8 }}>
-              共 {files.length} 个，这里显示最近 10 个。<b>如实说明</b>：现在还没有账号，所以列出的是
-              <b>这台电脑上的全部导出文件</b>；接入账号后会改成只看自己的。
+              共 {files.length} 个，这里显示最近 10 个；文件列表只包含<b>当前访客的导出文件</b>。
             </p>
           </>
         )}
@@ -223,34 +221,6 @@ export function MineDashboard() {
         )}
       </section>
 
-      {/* 还没做完的（说清"跟登录无关，是功能还没做"） */}
-      <section className="ct-card">
-        <h2 style={{ fontSize: 18, marginBottom: 8 }}>
-          <KeyRound size={16} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />
-          还没做完的（跟「有没有登录」无关，是功能还没开发）
-        </h2>
-        <p className="ct-mini" style={{ marginBottom: 8 }}>
-          你已经登录了（当前账号在左下角「设置」里能看到）。下面这几项**不是登录的问题**，是功能还没做：
-        </p>
-        <ul className="ct-range">
-          <li>
-            <b>历史记录</b>：跨设备、重启后还能看到问过什么、审过什么 —— 需要把结果**落库**（下一步 2-3）
-          </li>
-          <li>
-            <b>导出文件按账号隔离</b>：现在这一页列的是**这台电脑上的全部导出文件**；
-            要改成「只看到自己的」，需要给会话/运行/导出加**归属**（下一步 2-2，这是底线要求）
-          </li>
-          <li>
-            <b>材料长期保存</b>：现在的口径是「原文不落盘」，要长期保存得先解决加密与合规
-          </li>
-          <li>
-            <b>按人的用量明细</b>：现在的统计是「这台机器的」，不是「你的」
-          </li>
-        </ul>
-        <p className="ct-mini" style={{ marginTop: 8 }}>
-          登录现在能干的事：未登录不能使用 · 在「设置」里改密码、退出登录 · 管理员生成邀请码。
-        </p>
-      </section>
     </div>
   );
 }
