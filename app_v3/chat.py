@@ -5,6 +5,8 @@
   用户想说几轮就说几轮，追问是模型自己在回答里问出来的。
 - 回答流式吐字，前端边收边显示。
 - 失败就是失败（超时/网络/服务不可用），文案直说，不把失败说成"没有相关规定"。
+- 所有读写都带 `user_id`（2026-09-27 隔离改造）：会话归属不符时 `store` 会抛
+  `SessionOwnedByOther`，由 HTTP 层按「会话不存在」处理。
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from typing import Any
 from .model import offline, retrieve_while_offline, stream_reply
 from .prompt import build_messages
 from .retrieve import search
+from .store import ANON
 
 LOG = logging.getLogger("faxiaozhi.v3.chat")
 
@@ -39,6 +42,7 @@ async def run_turn(
     cfg: Any,
     store: Any,
     payload: dict[str, Any],
+    user_id: str = ANON,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     message = str(payload.get("message") or "").strip()
     if not message:
@@ -47,9 +51,9 @@ async def run_turn(
 
     # 离线模式下默认不查法规库（不外发任何请求）；模型走 stub 时也一样
     use_retrieval = payload.get("use_retrieval") is not False and (not offline() or retrieve_while_offline())
-    session = store.ensure_session(payload.get("session_id"), title=message)
+    session = store.ensure_session(payload.get("session_id"), title=message, user_id=user_id)
     sid = str(session["session_id"])
-    store.append_message(sid, "user", message)
+    store.append_message(sid, "user", message, user_id=user_id)
     yield "meta", {"session_id": sid, "is_stub": offline(), "title": session.get("title") or ""}
 
     started = time.time()
@@ -62,7 +66,7 @@ async def run_turn(
             # 检索失败也要说清楚：接口失败不等于没有相关规定
             yield "note", {"text": "检索没成功：" + "；".join(got["notes"]) + "。这轮回答没有引用检索结果。"}
 
-    history = store.messages(sid)
+    history = store.messages(sid, user_id=user_id)
     messages = build_messages(history, got["sources"])
 
     chunks: list[str] = []
@@ -73,7 +77,7 @@ async def run_turn(
     except Exception as exc:  # noqa: BLE001 —— 真实失败必须让用户看见
         LOG.warning("生成失败：%s / %s", type(exc).__name__, exc)
         if chunks:
-            store.append_message(sid, "assistant", "".join(chunks) + INTERRUPTED, got["sources"])
+            store.append_message(sid, "assistant", "".join(chunks) + INTERRUPTED, got["sources"], user_id=user_id)
         yield "error", {"code": type(exc).__name__, "message": _friendly(exc)}
         return
 
@@ -82,7 +86,7 @@ async def run_turn(
         yield "error", {"code": "empty_answer", "message": "模型这次没有返回内容，请重发一次。"}
         return
 
-    saved = store.append_message(sid, "assistant", text, got["sources"])
+    saved = store.append_message(sid, "assistant", text, got["sources"], user_id=user_id)
     yield "done", {
         "session_id": sid,
         "message_id": saved["id"],

@@ -12,6 +12,7 @@
 /runs/
 /exports/
 /uploads/
+/logs/
 # Dependencies and generated output
 .venv/
 node_modules/

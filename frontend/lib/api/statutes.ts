@@ -28,6 +28,7 @@ export type StatuteSearchResult = {
   input: string;
   parsed: { name: string; article: string; keyword: string };
   data_as_of: string;
+  stale_exact_title?: boolean;
   total: number;
   items: StatuteHit[];
 };
@@ -52,6 +53,27 @@ export type StatutesStatus = {
   data_as_of: string;
 };
 
+export type AgentStatuteHit = StatuteHit & {
+  source: "local" | "mcp";
+  matched_query: string;
+  citation_checked: boolean;
+  check_note: string;
+  uri: string;
+};
+
+export type AgentSearchResult =
+  | { status: "needs_clarification"; question: string; issue: string; mode: "model" | "rules" }
+  | {
+      status: "completed";
+      mode: "model" | "rules";
+      issue: string;
+      queries: string[];
+      applicable_at: string;
+      assumptions: string[];
+      items: AgentStatuteHit[];
+      notice: string;
+    };
+
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(`${BASE}${path}`, { headers: { accept: "application/json" } });
   const payload = (await response.json().catch(() => null)) as
@@ -64,6 +86,22 @@ async function get<T>(path: string): Promise<T> {
   return payload as T;
 }
 
+async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | (T & { error?: { code?: string; message?: string } })
+    | null;
+  if (!response.ok) {
+    throw new ApiError(payload?.error?.code ?? "request_failed", payload?.error?.message ?? "智能检索失败。", response.status);
+  }
+  if (!payload) throw new ApiError("internal_error", "后端返回内容无法解析。", response.status);
+  return payload;
+}
+
 export const statutesApi = {
   status: () => get<StatutesStatus>("/status"),
   search: (query: string, options: { includeInvalid?: boolean; limit?: number } = {}) => {
@@ -72,6 +110,13 @@ export const statutesApi = {
     return get<StatuteSearchResult>(`/search?${params.toString()}`);
   },
   detail: (bbbs: string) => get<StatuteDetail>(`/detail?bbbs=${encodeURIComponent(bbbs)}`),
+  agent: (question: string, options: { clarification?: string; skipClarification?: boolean; includeInvalid?: boolean } = {}) =>
+    post<AgentSearchResult>("/agent", {
+      question,
+      clarification: options.clarification ?? "",
+      skip_clarification: options.skipClarification ?? false,
+      include_invalid: options.includeInvalid ?? false,
+    }),
 };
 
 /** 复制到剪贴板的引用格式：统一《法规名》第X条 + 效力状态 */

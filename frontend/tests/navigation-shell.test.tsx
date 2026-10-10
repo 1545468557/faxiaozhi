@@ -1,14 +1,13 @@
-import { act, cleanup, fireEvent, render as renderView, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderView, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AppShell } from "@/components/shell/app-shell";
 import { WorkspaceSessionProvider } from "@/components/workspace-session";
 import type { ReactNode } from "react";
 const render = (children: ReactNode) => renderView(<WorkspaceSessionProvider>{children}</WorkspaceSessionProvider>);
-const api = vi.hoisted(() => ({ me: vi.fn(), sessions: vi.fn(), pathname: "/" }));
+const api = vi.hoisted(() => ({ sessions: vi.fn(), pathname: "/" }));
 vi.mock("next/navigation", () => ({ usePathname: () => api.pathname }));
-vi.mock("@/lib/api/auth", () => ({ authApi: { me: api.me } }));
 vi.mock("@/lib/api/v3", () => ({ sessions: api.sessions }));
-beforeEach(() => { api.pathname = "/"; api.me.mockResolvedValue({ username: "test" }); api.sessions.mockResolvedValue({ sessions: [] }); });
+beforeEach(() => { api.pathname = "/"; api.sessions.mockResolvedValue({ sessions: [] }); });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 it("keeps all five real routes and expands/collapses the rail", async () => {
   render(<AppShell><p>正文</p></AppShell>);
@@ -42,14 +41,6 @@ it("shows a recoverable history error without fake rows", async () => {
   fireEvent.click(screen.getByRole("button", { name: "历史对话" }));
   await screen.findByText("历史对话暂时加载失败，请关闭后重新打开。");
 });
-it("does not expose navigation or fetch history when logged out", async () => {
-  api.me.mockResolvedValue(null);
-  render(<AppShell><p>正文</p></AppShell>);
-  await screen.findByText("请先登录");
-  await waitFor(() => expect(screen.queryByRole("button", { name: "历史对话" })).toBeNull());
-  expect(api.sessions).not.toHaveBeenCalled();
-});
-
 it("preserves expanded navigation across module clicks and shell remounts", async () => {
   const view = renderView(<WorkspaceSessionProvider><AppShell key="home"><p>首页</p></AppShell></WorkspaceSessionProvider>);
   await screen.findByRole("link", { name: "设置" });
@@ -67,26 +58,12 @@ it("preserves expanded navigation across module clicks and shell remounts", asyn
   expect(screen.getByRole("button", { name: "展开导航", expanded: false })).toBeTruthy();
 });
 
-it("retains confirmed account controls while a new module checks auth", async () => {
-  const view = renderView(<WorkspaceSessionProvider><AppShell key="a">首页</AppShell></WorkspaceSessionProvider>);
-  await screen.findByRole("link", { name: "我的账号" });
-  let resolve!: (value: null) => void;
-  api.me.mockImplementationOnce(() => new Promise<null>(done => { resolve = done; }));
-  view.rerender(<WorkspaceSessionProvider><AppShell key="b">合同页</AppShell></WorkspaceSessionProvider>);
+it.each(["/", "/research", "/contract", "/statutes", "/me", "/settings"])("shows %s without a login screen", pathname => {
+  api.pathname = pathname;
+  render(<AppShell><p>模块正文</p></AppShell>);
+  expect(screen.getByText("模块正文")).toBeTruthy();
+  expect(screen.queryByText("请先登录")).toBeNull();
   expect(screen.getByRole("link", { name: "设置" })).toBeTruthy();
-  expect(screen.getByRole("link", { name: "我的账号" })).toBeTruthy();
-  expect(screen.queryByRole("link", { name: "登录" })).toBeNull();
-  await act(async () => resolve(null));
-  expect(screen.getByText("请先登录")).toBeTruthy();
-});
-
-it("does not replace the account with login on a transient network failure", async () => {
-  const view = renderView(<WorkspaceSessionProvider><AppShell key="a">首页</AppShell></WorkspaceSessionProvider>);
-  await screen.findByRole("link", { name: "我的账号" });
-  api.me.mockRejectedValueOnce(new Error("offline"));
-  await act(async () => { view.rerender(<WorkspaceSessionProvider><AppShell key="b">合同页</AppShell></WorkspaceSessionProvider>); });
-  expect(screen.getByRole("link", { name: "设置" })).toBeTruthy();
-  expect(screen.getByRole("link", { name: "我的账号" })).toBeTruthy();
 });
 
 it.each(["/research", "/contract", "/statutes", "/me", "/settings"])("does not show the question history header on %s", async pathname => {

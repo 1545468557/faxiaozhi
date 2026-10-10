@@ -48,3 +48,6 @@ next-env.d.ts
 
 # 构建缓存（不应进仓库）
 tsconfig.tsbuildinfo
+
+# 主题切换器的原始色快照（scripts/theme.mjs 用来自动还原，本地文件即可）
+/.theme/

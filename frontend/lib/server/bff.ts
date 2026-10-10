@@ -12,7 +12,8 @@
  * 1. **SSE 真流式**：`text/event-stream` 的响应体原样透传，不 `await text()`，并关掉缓冲；
  * 2. **错误结构不改写**：后端 `{error:{code,message}}` 原样返回，前端靠 code 决定文案与重试；
  * 3. **multipart / 下载**：不手写 content-type（boundary 会坏）；`Content-Disposition` 要透传；
- * 4. **只允许本机来源**：后端只监听 127.0.0.1，代理层也不对外开口子。
+ * 4. **来源白名单**：默认只允许本机（行为与改造前一致）；
+ *    要让局域网 / 域名 / 隧道访问，用 `ALLOWED_HOSTS` 环境变量扩展，不改代码。
  */
 
 const BASE = (process.env.BACKEND_BASE_URL ?? "http://127.0.0.1:8010").replace(/\/+$/, "");
@@ -24,16 +25,51 @@ const BASE = (process.env.BACKEND_BASE_URL ?? "http://127.0.0.1:8010").replace(/
  */
 const V3_BASE = (process.env.V3_BACKEND_BASE_URL ?? "http://127.0.0.1:8011").replace(/\/+$/, "");
 
+/**
+ * 允许通过代理访问的主机白名单（比对 Host / Origin 头）。
+ *
+ * **默认只有本机** —— 所以「本机部署」的行为与改造前完全一致。
+ * 要让局域网 / 你的域名 / 隧道访问，用环境变量扩展，不动代码：
+ *
+ *   ALLOWED_HOSTS=faxiaozhi.example.com,192.168.129.*
+ *
+ * 三种写法：
+ *   - 精确主机名：`faxiaozhi.example.com`
+ *   - 前缀通配：`192.168.129.*`（局域网 IP 被 DHCP 换掉也不用改）
+ *   - `*`：任意 Host（**只在隧道 / 反向代理后面用**，且须清楚 DNS 重绑定风险）
+ *
+ * 这是纵深防御（挡 DNS 重绑定），**不是主要鉴权** ——
+ * 主要鉴权是后端登录门（`app/auth/guard.py`）。
+ * 但没有必要就不要写 `*`：它还兼着「域名没配对时立刻报错」的提示作用。
+ */
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
-function isLocalRequest(request: Request): boolean {
-  const host = request.headers.get("host") ?? "";
-  const hostname = host.startsWith("[") ? host.slice(0, host.indexOf("]") + 1) : host.split(":")[0];
-  if (hostname && !LOCAL_HOSTS.has(hostname)) return false;
+function hostAllowed(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase();
+  if (!host) return true; // 没有 Host 头（直连 / 测试）→ 与改造前一致，放行
+  if (LOCAL_HOSTS.has(host)) return true;
+  for (const raw of (process.env.ALLOWED_HOSTS ?? "").split(",")) {
+    const pattern = raw.trim().toLowerCase();
+    if (!pattern) continue;
+    if (pattern === "*") return true;
+    if (pattern.endsWith("*") ? host.startsWith(pattern.slice(0, -1)) : host === pattern) return true;
+  }
+  return false;
+}
+
+/** 取 Host 头里的主机名。IPv6 保留方括号 —— 与 LOCAL_HOSTS 的写法及 URL.hostname 一致。 */
+function hostnameOf(hostHeader: string): string {
+  return hostHeader.startsWith("[")
+    ? hostHeader.slice(0, hostHeader.indexOf("]") + 1)
+    : hostHeader.split(":")[0];
+}
+
+function isAllowedRequest(request: Request): boolean {
+  if (!hostAllowed(hostnameOf(request.headers.get("host") ?? ""))) return false;
   const origin = request.headers.get("origin");
   if (!origin) return true;
   try {
-    return LOCAL_HOSTS.has(new URL(origin).hostname);
+    return hostAllowed(new URL(origin).hostname);
   } catch {
     return false;
   }
@@ -46,8 +82,13 @@ const errorJson = (code: string, message: string, status: number) =>
   );
 
 export async function forward(request: Request, base: string, segments: string[]): Promise<Response> {
-  if (!isLocalRequest(request)) {
-    return errorJson("permission_denied", "当前只允许在本机使用。", 403);
+  if (!isAllowedRequest(request)) {
+    // 排查线索写进服务端日志；返回给浏览器的文案不暴露配置细节。
+    console.warn(
+      `[bff] 拒绝来源 host=${request.headers.get("host")} origin=${request.headers.get("origin")}；` +
+        "如需放开，请在该服务的 ALLOWED_HOSTS 里追加。",
+    );
+    return errorJson("permission_denied", "该来源未被允许访问。", 403);
   }
 
   const incoming = new URL(request.url);
@@ -88,6 +129,14 @@ export async function forward(request: Request, base: string, segments: string[]
 
   const contentType = upstream.headers.get("content-type") ?? "application/json; charset=utf-8";
   const out = new Headers();
+  // 首次访客请求可能是 SSE；该响应也必须下发访客身份 Cookie。
+  const setCookies = typeof upstream.headers.getSetCookie === "function" ? upstream.headers.getSetCookie() : [];
+  if (setCookies.length) {
+    for (const value of setCookies) out.append("set-cookie", value);
+  } else {
+    const single = upstream.headers.get("set-cookie");
+    if (single) out.append("set-cookie", single);
+  }
 
   if (contentType.includes("text/event-stream")) {
     out.set("content-type", "text/event-stream; charset=utf-8");
@@ -99,14 +148,6 @@ export async function forward(request: Request, base: string, segments: string[]
 
   out.set("cache-control", "no-store");
   out.set("content-type", contentType);
-  // 下发登录 Cookie（HttpOnly 由后端设置，代理只负责原样透传，不改属性）
-  const setCookies = typeof upstream.headers.getSetCookie === "function" ? upstream.headers.getSetCookie() : [];
-  if (setCookies.length) {
-    for (const value of setCookies) out.append("set-cookie", value);
-  } else {
-    const single = upstream.headers.get("set-cookie");
-    if (single) out.append("set-cookie", single);
-  }
   const disposition = upstream.headers.get("content-disposition");
   if (disposition) out.set("content-disposition", disposition);
 

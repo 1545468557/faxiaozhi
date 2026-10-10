@@ -397,6 +397,7 @@ class RunContext:
             "schema_version": SCHEMA_VERSION,
             "run_id": self.run_id,
             "session_id": self.session.id,
+            "owner": self.session.owner,
             "workflow": self.workflow,
             "args": args,
             "status": self.session.status,

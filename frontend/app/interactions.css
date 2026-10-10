@@ -6,7 +6,7 @@
   transition: border-color 200ms, box-shadow 260ms;
 }
 .fh-home .fh-composer:focus-within {
-  box-shadow: 0 0 0 4px #0b766b12, 0 8px 24px #264c3d09;
+  box-shadow: 0 0 0 4px #0b397612, 0 8px 24px #26424c09;
 }
 .fh-home :is(.fh-button, .fh-composer-tabs button, .fh-examples button),
 .fs-header :is(.fs-start, .fs-menu-button),
@@ -42,10 +42,10 @@
   transition: background 180ms, border-color 180ms, box-shadow 220ms;
 }
 .workspace-page .workbench .case-card:focus-within {
-  border-color: #548e79;
-  box-shadow: 0 0 0 3px #0b766b0d;
+  border-color: #547c8e;
+  box-shadow: 0 0 0 3px #0b39760d;
 }
-.workspace-page .workbench .case-card.selected { box-shadow: inset 3px 0 0 #0b766b; }
+.workspace-page .workbench .case-card.selected { box-shadow: inset 3px 0 0 #0b3976; }
 .workspace-page .workbench .case-card [role="checkbox"] {
   transition: background 160ms, border-color 160ms, scale 120ms;
 }
@@ -59,7 +59,7 @@
 @media (hover: hover) and (pointer: fine) {
   .fh-home .fh-tool:hover {
     translate: 0 -3px;
-    box-shadow: 0 8px 20px #264c3d09;
+    box-shadow: 0 8px 20px #26424c09;
   }
   .fh-home .fh-tool:hover .fh-tool-action svg,
   .fh-home .fh-examples button:hover svg,
@@ -67,7 +67,7 @@
   .fh-home .fh-text-link:hover svg,
   .fh-home .fh-button:hover:not(:disabled) svg { translate: 3px 0; }
   .fs-header .fs-desktop-nav a:hover::after { scale: 1; }
-  .workspace-page .workbench .case-card:hover { border-color: #81aa98; }
+  .workspace-page .workbench .case-card:hover { border-color: #81a1aa; }
 }
 
 @media (prefers-reduced-motion: reduce) {

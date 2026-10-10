@@ -146,7 +146,7 @@ export function AskHome() {
                 换个问题
               </button>
               <span className="v2-note" style={{ alignSelf: "center" }}>
-                换问题会开一段新对话，刚才那段可以在「我的」里找回。
+                换问题会开一段新对话，刚才那段可以在「历史对话」里找回。
               </span>
             </div>
           </div>

@@ -1,0 +1,41 @@
+FROM node:22-bookworm-slim AS build
+WORKDIR /app/frontend
+
+# 默认走国内 npm 源。理由不是「快一点」，而是**不通**：
+# 境内直连 registry.npmjs.org 会 ECONNRESET / 读超时，实测一次 install 卡了 7 分半才失败。
+#   docker compose -f deploy/compose.yaml build \
+#     --build-arg NPM_REGISTRY=https://registry.npmjs.org frontend
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+
+# ⚠️ 这里有两件事容易踩：
+#   1. `npm_config_registry` 只对 **npm** 生效。实测 pnpm 11 的 `pnpm config get registry`
+#      在设了它之后**仍然返回 registry.npmjs.org** —— pnpm 11 已经不用 npm 那套配置链了，
+#      它读自己的文件：$XDG_CONFIG_HOME/pnpm/config.yaml（见下）。
+#      所以光设环境变量，install 还是全部打到 npmjs.org。
+#   2. `pnpm install --registry` 才是对 pnpm 确定有效的那条路。
+# 两条都写上：环境变量管 `npm install -g pnpm` 本身，config.yaml + CLI 参数管 pnpm。
+ENV npm_config_registry=$NPM_REGISTRY
+RUN mkdir -p "$HOME/.config/pnpm" \
+ && printf 'registry: %s\n' "$NPM_REGISTRY" > "$HOME/.config/pnpm/config.yaml" \
+ && npm install -g pnpm@11.19.0 \
+ && pnpm config get registry
+
+# package.json / 锁文件 / .npmrc 一起拷进来，装依赖这一步就能命中缓存 ——
+# 只要这三样没变，改业务代码不会重装依赖。
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/.npmrc ./
+# `--config.strict-dep-builds=false`：pnpm 11 的 `strictDepBuilds` 默认 true，
+# 遇到未审核的 postinstall 脚本（esbuild / sharp / unrs-resolver / workerd）
+# 会以非零码退出 ERR_PNPM_IGNORED_BUILDS，而容器里没法交互 approve-builds。
+# frontend/.npmrc 里也写了同样的开关（那是给开发者本机用的），这里再显式给一次，
+# 免得哪天 .npmrc 被改动后构建又莫名其妙挂在最后一行。
+RUN pnpm install --frozen-lockfile --registry "$NPM_REGISTRY" \
+      --config.strict-dep-builds=false
+COPY frontend/ ./
+RUN pnpm build
+
+FROM node:22-bookworm-slim
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=3001
+WORKDIR /app/frontend
+COPY --from=build /app/frontend ./
+EXPOSE 3001
+CMD ["node_modules/.bin/vinext", "start", "--port", "3001"]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -23,7 +24,7 @@ from .loop import install_default_hooks, user_prompt_submit
 from .materials import extract_identifier, mark_material_corroboration
 from .models import Status
 from .observability import get_observability
-from .session import STORE
+from .session import SESSION_CLOSED, STORE
 from .tools import dispatch_tool
 from .workflows import WORKFLOW_FOR_BRANCH, launch
 from .workflows.research import assemble_candidates
@@ -37,6 +38,9 @@ KB = KnowledgeBase(get_config())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from .auth import guard
+
+    guard.assert_guest_ready()
     install_default_hooks()
     cfg = get_config()
     cfg.self_check()
@@ -62,6 +66,54 @@ async def _api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
 async def _unhandled(_request: Request, exc: Exception) -> JSONResponse:
     LOG.exception("未处理异常")
     return _err(ApiError("internal_error"))
+
+
+def _owner() -> str:
+    """当前请求的数据归属（登录门中间件已经设好）。
+
+    会话的创建、并发名额、会话归属校验都从这里取 —— 不用把 owner 在 800 多行里传来传去。
+    不在请求上下文里时是 `_anonymous`（改造前的口径），见 `guard.current_owner`。
+    """
+    from .auth import guard
+
+    return guard.current_owner()
+
+
+@app.middleware("http")
+async def _login_gate(request: Request, call_next):
+    """统一登录门 + 会话归属（2026-09-27 隔离改造）。
+
+    门口按顺序做三件事：
+
+    1. **登录门** —— `/api/**` 除白名单（登录本身 + 探活/能力声明）外一律要求有效登录态。
+       改造前 8010 的 ~25 个业务接口零鉴权（`/api/exports` 甚至能列出并下载全部导出文件）。
+       逐个加 FastAPI 依赖的问题是**漏一个就是一个越权口子**，所以按路径规则收口。
+    2. **设当前请求的归属** —— 会话层据此判断「这条数据是不是你的」。会话在
+       `STORE.create()` 里自动落到这个桶，所以新接口不用记得传 owner。
+    3. **会话归属校验** —— 门口只挡「没登录的人」，不挡「登了录但拿着别人 sid 的人」。
+       按 `/api/session/{sid}/...` 的形状统一校验一次就覆盖全部 20 个会话接口，
+       不用去改 19 个 `STORE.get()` 调用点（改 19 处**一定会漏一处**）。
+
+    第 3 步用的是 `belongs_to()`：不抛异常、不 `touch` —— 中间件每个请求都要调，不能有副作用。
+    """
+    from .auth import guard
+
+    blocked = guard.blocked_response(request)
+    if blocked is not None:
+        return blocked
+
+    owner = guard.owner_key(guard.request_principal(request))
+    guard.set_current_owner(owner)
+
+    sid = guard.session_id_in_path(request.url.path)
+    if sid is not None and not STORE.belongs_to(sid, owner):
+        return guard.session_not_found_response()
+
+    limited = guard.guest_limit_response(request)
+    if limited is not None:
+        return guard.attach_guest_cookie(limited, request)
+
+    return guard.attach_guest_cookie(await call_next(request), request)
 
 
 # ------------------------------------------------------------------ 基础
@@ -124,6 +176,8 @@ async def metrics(source: str | None = None) -> dict[str, Any]:
     """
     if source is not None and source not in {"real", "test", "unknown"}:
         raise ApiError("invalid_source", "source 只能是 real / test / unknown。")
+    if _owner().startswith("g_"):
+        raise ApiError("forbidden", "访客模式不提供全站统计。")
     return get_observability().summary(source=source)
 
 
@@ -154,7 +208,7 @@ async def session_state(session_id: str) -> dict[str, Any]:
 async def send_message(session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     session = STORE.get(session_id)
     STORE.sweep()
-    if STORE.active_count() > STORE.max_concurrent:
+    if STORE.active_count(_owner()) > STORE.max_concurrent:
         raise ApiError("concurrency_queued")
     text = str(payload.get("text") or "").strip()
     if not text:
@@ -202,16 +256,33 @@ def _resume_workflow(state: dict[str, Any], branch: str | None = None) -> tuple[
     return branch, WORKFLOW_FOR_BRANCH[branch]
 
 
+def _owned_run_state(run_id: str) -> dict[str, Any]:
+    """Resume only a journal owned by this visitor; hide unknown or foreign IDs alike."""
+    from .auth import guard
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id):
+        raise ApiError("run_not_found")
+    state_file = get_config().runs_dir / f"{run_id}.json"
+    if not state_file.is_file():
+        raise ApiError("run_not_found")
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ApiError("run_not_found") from None
+    if not isinstance(state, dict) or state.get("run_id") != run_id:
+        raise ApiError("run_not_found")
+    if guard.require_login_enabled() and state.get("owner") != _owner():
+        raise ApiError("run_not_found")
+    return state
+
+
 @app.post("/api/session/{session_id}/resume")
 async def resume_session(session_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     session = STORE.get(session_id)
     run_id = str((payload or {}).get("run_id") or session.run_id or "")
     if not run_id:
         raise ApiError("run_not_found")
-    state_file = get_config().runs_dir / f"{run_id}.json"
-    if not state_file.exists():
-        raise ApiError("run_not_found")
-    state = json.loads(state_file.read_text(encoding="utf-8"))
+    state = _owned_run_state(run_id)
     _, workflow = _resume_workflow(state, session.branch)
     args = state.get("args", {})
     task = asyncio.create_task(
@@ -226,10 +297,7 @@ async def resume_session(session_id: str, payload: dict[str, Any] | None = None)
 @app.post("/api/runs/{run_id}/resume")
 async def resume_run(run_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """服务重启后按 run_id 恢复：新开会话 + 从 journal 重放（已完成步骤不重跑）。"""
-    state_file = get_config().runs_dir / f"{run_id}.json"
-    if not state_file.exists():
-        raise ApiError("run_not_found")
-    state = json.loads(state_file.read_text(encoding="utf-8"))
+    state = _owned_run_state(run_id)
     branch, workflow = _resume_workflow(state, (payload or {}).get("branch"))
     session = STORE.create(branch=branch)
     session.run_id = run_id
@@ -782,7 +850,7 @@ async def consult_answer(session_id: str, payload: dict[str, Any]) -> dict[str, 
         return await send_message(session_id, {"text": text})
 
     STORE.sweep()
-    if STORE.active_count() > STORE.max_concurrent:
+    if STORE.active_count(_owner()) > STORE.max_concurrent:
         raise ApiError("concurrency_queued")
     # 跳过是控制信号，不伪装成用户事实；可把尚未提交的输入一并交给解答步骤。
     if text:
@@ -814,7 +882,7 @@ async def contract_review(session_id: str, payload: dict[str, Any] | None = None
     if session.branch != "contract":
         raise ApiError("invalid_request", "该会话不是合同审查分支。")
     STORE.sweep()
-    if STORE.active_count() > STORE.max_concurrent:
+    if STORE.active_count(_owner()) > STORE.max_concurrent:
         raise ApiError("concurrency_queued")
     requirements = (payload or {}).get("requirements", "")
     if not isinstance(requirements, str) or len(requirements) > 2000:
@@ -842,7 +910,9 @@ async def contract_export(session_id: str, payload: dict[str, Any] | None = None
     review = validate_review_notes(data.pop("review", {}), session.contract.get("risks") or [])
     result = await export(session_id, data)
     if review and result.get("filename"):
-        render_contract_report(session, get_config().exports_dir / result["filename"], review=review)
+        from .auth import guard
+
+        render_contract_report(session, guard.current_owner_dir(get_config().exports_dir) / result["filename"], review=review)
     return result
 
 
@@ -853,12 +923,10 @@ async def contract_export(session_id: str, payload: dict[str, Any] | None = None
 
 
 def _cookie_token(request: Request) -> str | None:
-    raw = request.headers.get("cookie") or ""
-    for part in raw.split(";"):
-        name, _, value = part.strip().partition("=")
-        if name == "fzx_session":
-            return value or None
-    return None
+    # 实现在 app/auth/guard.py（与登录门共用同一份 Cookie 解析，避免两处规则不一致）
+    from .auth import guard
+
+    return guard.cookie_token(request)
 
 
 def _with_cookie(payload: dict[str, Any], token: str) -> JSONResponse:
@@ -869,29 +937,68 @@ def _with_cookie(payload: dict[str, Any], token: str) -> JSONResponse:
     return response
 
 
-@app.post("/api/auth/register")
-async def auth_register(request: Request) -> JSONResponse:
-    """邀请码注册（密码用 scrypt 存储；库里只存邀请码哈希）。"""
+@app.post("/api/auth/code")
+async def auth_send_code(request: Request) -> dict[str, Any]:
+    """发短信验证码（`purpose`: register / login / change_password）。
+
+    默认通道是 `mock`：**不真发**，验证码写到服务端日志与 `data/sms-outbox.jsonl`。
+    返回里**不含验证码**，只有 `mock: true` 让界面提示「当前为模拟发码」。
+    """
     from .auth import core as auth
+    from .auth import sms
 
     body = await request.json()
     try:
-        user = auth.register(str(body.get("invite_code", "")), str(body.get("username", "")), str(body.get("password", "")))
+        return auth.issue_code(str(body.get("phone", "")), str(body.get("purpose", "login")))
     except auth.AuthError as exc:
         raise ApiError(exc.code, exc.message) from exc
-    _, _, token = auth.login(user["username"], str(body.get("password", "")))
+    except (sms.SmsNotConfigured, sms.SmsSendFailed) as exc:
+        raise ApiError("sms_unavailable", str(exc)) from exc
+
+
+@app.post("/api/auth/register")
+async def auth_register(request: Request) -> JSONResponse:
+    """邀请码 + 手机号 + 验证码注册；密码可选（只是收不到短信时的备用登录方式）。"""
+    from .auth import core as auth
+    from .auth import sms
+
+    body = await request.json()
+    try:
+        user, _ttl, token = auth.register(
+            str(body.get("invite_code", "")),
+            str(body.get("phone", "")),
+            str(body.get("code", "")),
+            str(body.get("password", "") or ""),
+        )
+    except auth.AuthError as exc:
+        raise ApiError(exc.code, exc.message) from exc
+    except (sms.SmsNotConfigured, sms.SmsSendFailed) as exc:
+        raise ApiError("sms_unavailable", str(exc)) from exc
     return _with_cookie({"user": user}, token)
 
 
 @app.post("/api/auth/login")
 async def auth_login(request: Request) -> JSONResponse:
+    """手机号登录。给了 `code` 走验证码（主路径），给了 `password` 走密码（辅路径）。"""
     from .auth import core as auth
+    from .auth import sms
 
     body = await request.json()
+    phone = str(body.get("phone", ""))
     try:
-        user, _ttl, token = auth.login(str(body.get("username", "")), str(body.get("password", "")))
+        if str(body.get("code", "")).strip():
+            user, _ttl, token = auth.login_with_code(phone, str(body.get("code", "")))
+        elif str(body.get("password", "")).strip():
+            user, _ttl, token = auth.login_with_password(phone, str(body.get("password", "")))
+        else:
+            raise ApiError("empty_input", "请填验证码，或改用密码登录。")
     except auth.AuthError as exc:
         raise ApiError(exc.code, exc.message) from exc
+    except (sms.SmsNotConfigured, sms.SmsSendFailed) as exc:
+        # 远端校验通道（pnvs）会在**登录这一步**打服务商接口，它挂了要报 502
+        # `sms_unavailable`（可重试），不能变成 500。用户**输错码**走的是上面
+        # AuthError 那条分支（400）—— 两者绝不能混。
+        raise ApiError("sms_unavailable", str(exc)) from exc
     return _with_cookie({"user": user}, token)
 
 
@@ -907,14 +1014,26 @@ async def auth_logout(request: Request) -> JSONResponse:
 
 @app.post("/api/auth/password")
 async def auth_change_password(request: Request) -> dict[str, Any]:
-    """改密码（作废其它设备的登录态，当前这条保留）。"""
+    """改密码 / 首次设密码：给 `old_password`，或给 `code`（purpose=change_password）。
+
+    验证码那条路是给「注册时没设密码」的账号用的 —— 它们没有原密码可填。
+    """
     from .auth import core as auth
+    from .auth import sms
 
     body = await request.json()
     try:
-        auth.change_password(_cookie_token(request), str(body.get("old_password", "")), str(body.get("new_password", "")))
+        auth.change_password(
+            _cookie_token(request),
+            str(body.get("new_password", "")),
+            old_password=str(body.get("old_password", "") or ""),
+            code=str(body.get("code", "") or ""),
+        )
     except auth.AuthError as exc:
         raise ApiError(exc.code, exc.message) from exc
+    except (sms.SmsNotConfigured, sms.SmsSendFailed) as exc:
+        # 同 /api/auth/login：远端校验通道的故障是 502，不是 500。
+        raise ApiError("sms_unavailable", str(exc)) from exc
     return {"ok": True}
 
 
@@ -955,6 +1074,87 @@ async def admin_invite_list(request: Request) -> dict[str, Any]:
     return {"items": auth.list_invites()}
 
 
+def _admin_actor(request: Request) -> dict[str, Any]:
+    """后台入口的权限判定：必须是 owner 或 admin。
+
+    未登录 → 401（auth_required）；登录了但不是管理员 → 403（forbidden）。
+    权限判定只在这一处，后台所有接口都走它 —— 不靠每个端点自己记得写。
+    """
+    from .auth import core as auth
+
+    user = auth.session_from_request(_cookie_token(request))
+    if user is None:
+        raise ApiError("auth_required", "请先登录。")
+    if user["role"] not in {"owner", "admin"}:
+        raise ApiError("forbidden", "只有管理员可以访问后台。")
+    return user
+
+
+@app.get("/api/admin/overview")
+async def admin_overview(request: Request) -> dict[str, Any]:
+    """后台总览：**只有聚合数字**（账号、使用量、质量基线、在跑会话）。
+
+    口径复用 observability.summary()；`?source=real|test|offline` 可切换来源，
+    默认 real —— 测试与离线跑出来的数据不能混进真实成绩（见 app/observability.py）。
+    这里刻意**不返回**任何会话 id、手机号全号或用户输入内容。
+    """
+    from .auth import core as auth
+    from .observability import SOURCE_REAL, get_observability
+
+    _admin_actor(request)
+    raw_source = (request.query_params.get("source") or SOURCE_REAL).strip()
+    # "all" = 不按来源过滤（界面上的「全部来源」）；其余原样交给 summary()
+    source = None if raw_source == "all" else raw_source
+    summary = get_observability().summary(source=source)
+    by_branch: dict[str, int] = {}
+    for session in STORE.all_sessions():
+        if session.status == SESSION_CLOSED:
+            continue
+        by_branch[session.branch] = by_branch.get(session.branch, 0) + 1
+    return {
+        "accounts": auth.account_stats(),
+        "usage": {
+            "events": summary["events"],
+            "by_source": summary["by_source"],
+            "by_event": dict(sorted(summary["by_event"].items(), key=lambda kv: -kv[1])[:15]),
+            "by_status": summary["by_status"],
+        },
+        "quality": {
+            "citations": summary["citations"],
+            "latency_ms": summary["latency_ms"],
+            "library_hit_rate": summary["library_hit_rate"],
+            "corroboration": summary["corroboration"],
+        },
+        "live_sessions": {"by_branch": by_branch, "total": sum(by_branch.values())},
+        "source_filter": summary["source_filter"],
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+    }
+
+
+@app.get("/api/admin/staff")
+async def admin_staff_list(request: Request) -> dict[str, Any]:
+    """管理员名册（手机号打码）。**这不是用户列表** —— 普通用户不在其中。"""
+    from .auth import core as auth
+
+    _admin_actor(request)
+    return {"items": auth.staff_list()}
+
+
+@app.post("/api/admin/staff")
+async def admin_staff_set(request: Request) -> dict[str, Any]:
+    """按手机号授予 / 收回管理员（**仅 owner**）。"""
+    from .auth import core as auth
+
+    actor = _admin_actor(request)
+    if actor["role"] != "owner":
+        raise ApiError("forbidden", "只有创始管理员可以授予管理员权限。")
+    body = await request.json() if await request.body() else {}
+    try:
+        return auth.set_role(str(body.get("phone", "")), str(body.get("role", "")))
+    except auth.AuthError as exc:
+        raise ApiError(exc.code, exc.message) from exc
+
+
 @app.get("/api/statutes/status")
 async def statutes_status() -> dict[str, Any]:
     """本地法规库的规模与状态分布（界面用来标注"默认只出有效条文"的依据）。"""
@@ -980,6 +1180,14 @@ async def statutes_search(q: str = "", status: str = "valid", limit: int = 10) -
     return search(query, include_invalid=(status == "any"), limit=capped)
 
 
+@app.post("/api/statutes/agent")
+async def statutes_agent(payload: dict[str, Any]) -> dict[str, Any]:
+    """自然语言法规检索：规划、追问、真实检索与来源核验。"""
+    from .statute_agent import search_with_agent
+
+    return await search_with_agent(payload)
+
+
 @app.get("/api/statutes/{bbbs}")
 async def statutes_detail(bbbs: str) -> dict[str, Any]:
     """取一份法规的元数据与全部条文。"""
@@ -1001,7 +1209,10 @@ async def exports_list() -> dict[str, Any]:
     **如实说明**：现在没有账号体系，所以列出的是**本机导出目录里的全部文件**；
     接入账号后必须改成按用户过滤（底线 7：用户只能看自己的数据）。
     """
-    export_dir = get_config().exports_dir
+    from .auth import guard
+
+    # 只列**自己那一层子目录**：改造前列的是本机导出目录里的全部文件（违反底线 7）。
+    export_dir = guard.current_owner_dir(get_config().exports_dir)
     items: list[dict[str, Any]] = []
     if export_dir.exists():
         for path in sorted(export_dir.glob("*"), key=lambda item: item.stat().st_mtime, reverse=True):
@@ -1021,10 +1232,19 @@ async def exports_list() -> dict[str, Any]:
 
 @app.get("/exports/{name}")
 async def download(name: str) -> FileResponse:
-    export_dir = get_config().exports_dir.resolve()
+    """下载自己导出的文件。
+
+    路径解析限制在**当前用户的子目录**内：`..` 之类越界一律 `path_escape`；
+    「不是自己的 / 不存在」回**同一个** 404 —— 不确认别人导出过什么。
+    """
+    from .auth import guard
+
+    export_dir = (get_config().exports_dir / guard.current_owner()).resolve()
     target = (export_dir / name).resolve()
-    if not target.is_relative_to(export_dir) or not target.exists():
+    if not target.is_relative_to(export_dir):
         raise ApiError("path_escape")
+    if not target.exists() or not target.is_file():
+        raise ApiError("not_found", "文件不存在，或已不在你的导出目录里。")
     return FileResponse(target, filename=target.name)
 
 
@@ -1060,7 +1280,7 @@ def main() -> None:                                     # pragma: no cover
 
     cfg = get_config()
     host = cfg.env("APP_HOST") or "127.0.0.1"
-    port = int(cfg.env("APP_PORT") or 8010)
+    port = int(cfg.env("APP_PORT") or cfg.env("PORT") or 8010)
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   description: "本机工作台：会话、上传的材料、导出的文件、使用情况。",
 };
 
-/** 「我的」（迭代 3 追加）：现在没有账号体系，所以呈现本机范围内的真实数据。 */
+/** 「我的」：账号状态 + 本机工作台（2026-10-10 登录/注册表单拆到独立页 /login，这里只留状态卡）。 */
 export default function MePage() {
   return (
     <AppShell>

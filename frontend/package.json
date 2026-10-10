@@ -9,7 +9,7 @@
     "install:ci": "pnpm install --frozen-lockfile",
     "dev": "vinext dev --port 5174",
     "build": "vinext build",
-    "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
+    "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "test": "vitest run",

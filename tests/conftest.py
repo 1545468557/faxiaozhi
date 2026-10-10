@@ -22,6 +22,17 @@ os.environ["OFFLINE_SCENARIO"] = "clean"
 os.environ["FAXIAOZHI_OFFLINE"] = "1"
 # 2-2 新增：标记指标事件来源为 test，使北极星指标可只取真实数据（防测试污染）
 os.environ["FAXIAOZHI_TEST_MODE"] = "1"
+
+# 登录门（2026-09-27 隔离改造）：**默认关掉**。
+# 理由：既有 500 多条用例测的是**业务逻辑**，它们都在加登录门之前写的 ——
+# 直接 `POST /api/session`、不带任何登录态。把门打开会让 69 条一次性变红
+# （表现为 `KeyError: 'session_id'`，因为拿到的是 401 而不是会话）。
+# 与其去给 30+ 个文件逐个补登录，不如把「登录门」的验证集中到它自己的用例：
+#   `tests/test_isolation.py` 会把门**打开**，断言匿名 401 / 跨账号互相看不见。
+# 注意：`guard.require_login_enabled()` 是**每次调用都读 env** 的，
+# 所以用例里 `monkeypatch.setenv("AUTH_REQUIRE_LOGIN", "1")` 就能单独把门反开。
+# 这里不等于「生产也关着」—— `.env` 与代码默认都是**开**，只有测试进程是关的。
+os.environ["AUTH_REQUIRE_LOGIN"] = "0"
 for _name in (
     "PKULAW_MCP_TOKEN",
     "PKULAW_URL_STATUTE_SEMANTIC",

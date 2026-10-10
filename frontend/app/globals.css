@@ -38,8 +38,8 @@
   --input: #e5e5e5;
   --ring: #a1a1a1;
   --chart-1: #f54900;
-  --chart-2: #009689;
-  --chart-3: #104e64;
+  --chart-2: #003e96;
+  --chart-3: #101664;
   --chart-4: #ffb900;
   --chart-5: #fe9a00;
   --radius: 0.625rem;
@@ -115,7 +115,7 @@
     --input: #ffffff26;
     --ring: #737373;
     --chart-1: #8e51ff;
-    --chart-2: #00bc7d;
+    --chart-2: #007dbc;
     --chart-3: #fe9a00;
     --chart-4: #ad46ff;
     --chart-5: #ff2056;
