@@ -24,7 +24,7 @@ from .loop import install_default_hooks, user_prompt_submit
 from .materials import extract_identifier, mark_material_corroboration
 from .models import Status
 from .observability import get_observability
-from .session import STORE
+from .session import SESSION_CLOSED, STORE
 from .tools import dispatch_tool
 from .workflows import WORKFLOW_FOR_BRANCH, launch
 from .workflows.research import assemble_candidates
@@ -952,7 +952,7 @@ async def auth_send_code(request: Request) -> dict[str, Any]:
         return auth.issue_code(str(body.get("phone", "")), str(body.get("purpose", "login")))
     except auth.AuthError as exc:
         raise ApiError(exc.code, exc.message) from exc
-    except sms.SmsNotConfigured as exc:
+    except (sms.SmsNotConfigured, sms.SmsSendFailed) as exc:
         raise ApiError("sms_unavailable", str(exc)) from exc
 
 
@@ -972,7 +972,7 @@ async def auth_register(request: Request) -> JSONResponse:
         )
     except auth.AuthError as exc:
         raise ApiError(exc.code, exc.message) from exc
-    except sms.SmsNotConfigured as exc:
+    except (sms.SmsNotConfigured, sms.SmsSendFailed) as exc:
         raise ApiError("sms_unavailable", str(exc)) from exc
     return _with_cookie({"user": user}, token)
 
@@ -981,6 +981,7 @@ async def auth_register(request: Request) -> JSONResponse:
 async def auth_login(request: Request) -> JSONResponse:
     """手机号登录。给了 `code` 走验证码（主路径），给了 `password` 走密码（辅路径）。"""
     from .auth import core as auth
+    from .auth import sms
 
     body = await request.json()
     phone = str(body.get("phone", ""))
@@ -993,6 +994,11 @@ async def auth_login(request: Request) -> JSONResponse:
             raise ApiError("empty_input", "请填验证码，或改用密码登录。")
     except auth.AuthError as exc:
         raise ApiError(exc.code, exc.message) from exc
+    except (sms.SmsNotConfigured, sms.SmsSendFailed) as exc:
+        # 远端校验通道（pnvs）会在**登录这一步**打服务商接口，它挂了要报 502
+        # `sms_unavailable`（可重试），不能变成 500。用户**输错码**走的是上面
+        # AuthError 那条分支（400）—— 两者绝不能混。
+        raise ApiError("sms_unavailable", str(exc)) from exc
     return _with_cookie({"user": user}, token)
 
 
@@ -1013,6 +1019,7 @@ async def auth_change_password(request: Request) -> dict[str, Any]:
     验证码那条路是给「注册时没设密码」的账号用的 —— 它们没有原密码可填。
     """
     from .auth import core as auth
+    from .auth import sms
 
     body = await request.json()
     try:
@@ -1024,6 +1031,9 @@ async def auth_change_password(request: Request) -> dict[str, Any]:
         )
     except auth.AuthError as exc:
         raise ApiError(exc.code, exc.message) from exc
+    except (sms.SmsNotConfigured, sms.SmsSendFailed) as exc:
+        # 同 /api/auth/login：远端校验通道的故障是 502，不是 500。
+        raise ApiError("sms_unavailable", str(exc)) from exc
     return {"ok": True}
 
 
@@ -1062,6 +1072,87 @@ async def admin_invite_list(request: Request) -> dict[str, Any]:
     if user["role"] != "owner":
         raise ApiError("forbidden", "只有管理员可以查看邀请码。")
     return {"items": auth.list_invites()}
+
+
+def _admin_actor(request: Request) -> dict[str, Any]:
+    """后台入口的权限判定：必须是 owner 或 admin。
+
+    未登录 → 401（auth_required）；登录了但不是管理员 → 403（forbidden）。
+    权限判定只在这一处，后台所有接口都走它 —— 不靠每个端点自己记得写。
+    """
+    from .auth import core as auth
+
+    user = auth.session_from_request(_cookie_token(request))
+    if user is None:
+        raise ApiError("auth_required", "请先登录。")
+    if user["role"] not in {"owner", "admin"}:
+        raise ApiError("forbidden", "只有管理员可以访问后台。")
+    return user
+
+
+@app.get("/api/admin/overview")
+async def admin_overview(request: Request) -> dict[str, Any]:
+    """后台总览：**只有聚合数字**（账号、使用量、质量基线、在跑会话）。
+
+    口径复用 observability.summary()；`?source=real|test|offline` 可切换来源，
+    默认 real —— 测试与离线跑出来的数据不能混进真实成绩（见 app/observability.py）。
+    这里刻意**不返回**任何会话 id、手机号全号或用户输入内容。
+    """
+    from .auth import core as auth
+    from .observability import SOURCE_REAL, get_observability
+
+    _admin_actor(request)
+    raw_source = (request.query_params.get("source") or SOURCE_REAL).strip()
+    # "all" = 不按来源过滤（界面上的「全部来源」）；其余原样交给 summary()
+    source = None if raw_source == "all" else raw_source
+    summary = get_observability().summary(source=source)
+    by_branch: dict[str, int] = {}
+    for session in STORE.all_sessions():
+        if session.status == SESSION_CLOSED:
+            continue
+        by_branch[session.branch] = by_branch.get(session.branch, 0) + 1
+    return {
+        "accounts": auth.account_stats(),
+        "usage": {
+            "events": summary["events"],
+            "by_source": summary["by_source"],
+            "by_event": dict(sorted(summary["by_event"].items(), key=lambda kv: -kv[1])[:15]),
+            "by_status": summary["by_status"],
+        },
+        "quality": {
+            "citations": summary["citations"],
+            "latency_ms": summary["latency_ms"],
+            "library_hit_rate": summary["library_hit_rate"],
+            "corroboration": summary["corroboration"],
+        },
+        "live_sessions": {"by_branch": by_branch, "total": sum(by_branch.values())},
+        "source_filter": summary["source_filter"],
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+    }
+
+
+@app.get("/api/admin/staff")
+async def admin_staff_list(request: Request) -> dict[str, Any]:
+    """管理员名册（手机号打码）。**这不是用户列表** —— 普通用户不在其中。"""
+    from .auth import core as auth
+
+    _admin_actor(request)
+    return {"items": auth.staff_list()}
+
+
+@app.post("/api/admin/staff")
+async def admin_staff_set(request: Request) -> dict[str, Any]:
+    """按手机号授予 / 收回管理员（**仅 owner**）。"""
+    from .auth import core as auth
+
+    actor = _admin_actor(request)
+    if actor["role"] != "owner":
+        raise ApiError("forbidden", "只有创始管理员可以授予管理员权限。")
+    body = await request.json() if await request.body() else {}
+    try:
+        return auth.set_role(str(body.get("phone", "")), str(body.get("role", "")))
+    except auth.AuthError as exc:
+        raise ApiError(exc.code, exc.message) from exc
 
 
 @app.get("/api/statutes/status")

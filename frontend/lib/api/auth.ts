@@ -15,7 +15,7 @@ export type AuthUser = {
   phone: string;
   /** 打码手机号（138****8888），用于导航等处显示 */
   phone_masked: string;
-  role: "owner" | "member";
+  role: "owner" | "admin" | "member";
   /** 注册时是否设过密码。false ⇒ 只能走验证码登录 */
   has_password: boolean;
   expires_at?: string;

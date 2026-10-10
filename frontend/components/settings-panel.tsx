@@ -12,7 +12,7 @@ export function SettingsPanel() {
     <div className="ct-wrap">
       <header className="ct-head">
         <h1>设置</h1>
-        <p>连接状态与本机数据。</p>
+        <p>连接状态与本机数据。账号入口在「我的」。</p>
       </header>
       <BackendStatus />
 

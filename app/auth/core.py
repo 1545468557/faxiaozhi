@@ -20,6 +20,7 @@ import re
 import secrets
 import sqlite3
 import time
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,11 @@ PURPOSES = ("register", "login", "change_password")
 
 _PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
 _CODE_RE = re.compile(r"^[0-9]+$")
+#: 远端通道（pnvs）的验证码长度由服务商按 `CodeType` 决定（4~8 位），
+#: 与本地 `AUTH_CODE_LENGTH` **无关** —— 所以这里只做形状粗校验，
+#: 「对不对」交给服务商。若拿 `_CODE_RE` + 本地长度去卡，改动
+#: `AUTH_CODE_LENGTH` 之后会在**还没问服务商之前**就把正确的验证码判错。
+_REMOTE_CODE_RE = re.compile(r"^\d{4,8}$")
 
 
 class AuthError(Exception):
@@ -238,6 +244,11 @@ def _code_secret(conn: sqlite3.Connection) -> bytes:
     return secret
 
 
+#: 远端生成验证码（pnvs）时本地不存哈希的占位值。它只是为了满足 `NOT NULL`；
+#: `_check_code` 的 remote 分支**根本不会去比对它** —— 见那里的注释。
+_REMOTE_CODE_SENTINEL = "!code-managed-by-provider!"
+
+
 def _hash_code(conn: sqlite3.Connection, phone: str, purpose: str, code: str) -> str:
     """验证码只存哈希。带上 phone/purpose 做盐，避免「两个号同一个码」互相顶用。"""
     message = f"{phone}:{purpose}:{code}".encode()
@@ -249,6 +260,9 @@ def issue_code(raw_phone: str, purpose: str) -> dict[str, Any]:
 
     顺序是「先查限额 → 生成 → 发送 → 落库」，发送失败会把记录撤掉，
     这样用户能立刻重试，不会被一条发不出去的记录卡 60 秒。
+
+    `remote_verify()` 通道（pnvs）下**不生成验证码**：阿里云自己生成并保管，
+    我们只留一条本地记录用于限额与有效期，校验时再去问它。
     """
     from . import sms
 
@@ -274,8 +288,11 @@ def issue_code(raw_phone: str, purpose: str) -> dict[str, Any]:
             if len(recent) >= _code_max_per_day():
                 raise AuthError("code_rate_limited", "这个手机号今天验证码发得太多了，请改天再试。", status=429)
 
-        code = f"{secrets.randbelow(10 ** _code_length()):0{_code_length()}d}"
-        code_hash = _hash_code(conn, phone, purpose, code)
+        # 远端通道下验证码由服务商生成并保管，我们**拿不到明文**，
+        # 于是本地不留哈希（用哨兵值满足 NOT NULL），校验也改由服务商做。
+        remote = sms.remote_verify()
+        code = None if remote else f"{secrets.randbelow(10 ** _code_length()):0{_code_length()}d}"
+        code_hash = _REMOTE_CODE_SENTINEL if remote else _hash_code(conn, phone, purpose, code or "")
         # 同号同用途的旧码作废：避免「上一轮验证码还能用」这种绕过
         conn.execute(
             "UPDATE phone_codes SET consumed_at = ? WHERE phone = ? AND purpose = ? AND consumed_at IS NULL",
@@ -313,10 +330,22 @@ def _check_code(conn: sqlite3.Connection, phone: str, purpose: str, code: str) -
     **不消费**（不写 consumed_at）—— 消费交给调用方在同一个事务里做，
     这样「注册时手机号已占用」这类失败不会白烧掉一个验证码。
     试错会累加次数并立即提交（否则失败回滚会把计数也带走）。
+
+    两条互斥的路径：
+    - 本地通道（mock / aliyun）：比对本地哈希。
+    - `remote_verify()` 通道（pnvs）：「对不对」去问服务商；本地那条记录
+      仍然要查，因为它承担着**限次数**与**有效期**这两件服务商不管的事。
     """
+    from . import sms
+
     generic = AuthError("code_invalid", "验证码不对或已过期。")
     text = (code or "").strip()
-    if not _CODE_RE.match(text) or len(text) != _code_length():
+    remote = sms.remote_verify()
+
+    if remote:
+        if not _REMOTE_CODE_RE.match(text):
+            raise generic
+    elif not _CODE_RE.match(text) or len(text) != _code_length():
         raise generic
 
     row = conn.execute(
@@ -329,7 +358,14 @@ def _check_code(conn: sqlite3.Connection, phone: str, purpose: str, code: str) -
     if row["attempts"] >= _code_max_attempts():
         raise AuthError("code_attempts_exceeded", "验证码错误次数过多，请重新获取。", status=429)
 
-    if not hmac.compare_digest(row["code_hash"], _hash_code(conn, phone, purpose, text)):
+    if remote:
+        # 本地限次**必须保留**：去掉它等于把「无限次试码」的机会直接让给服务商，
+        # 而且 `AUTH_CODE_MAX_ATTEMPTS` 这条策略会**静默失效**（配上却不起作用）。
+        passed = sms.verify_code(phone, text, purpose)
+    else:
+        passed = hmac.compare_digest(row["code_hash"], _hash_code(conn, phone, purpose, text))
+
+    if not passed:
         conn.execute("UPDATE phone_codes SET attempts = attempts + 1 WHERE id = ?", (row["id"],))
         conn.commit()
         raise generic
@@ -369,6 +405,102 @@ def list_invites() -> list[dict[str, Any]]:
                 " FROM invites ORDER BY id DESC LIMIT 100"
             )
         ]
+
+
+# ------------------------------------------------------------------ 管理员与统计
+
+#: 后台里可以由 owner 授予 / 收回的角色。**owner 不在其中** ——
+#: 创世账号的角色只能由人改数据库，接口改错了没人能再进后台。
+GRANTABLE_ROLES = ("admin", "member")
+
+
+def staff_list() -> list[dict[str, Any]]:
+    """管理员名册：只含 owner / admin，**这不是用户列表**（普通用户不出现在这里）。
+
+    产品决定（2026-10-10）：后台只做聚合统计，要看到「人」就只看这一份名册；
+    手机号一律打码，且接口不回传全号。
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, phone, role, status, created_at, last_login_at FROM users"
+            " WHERE role IN ('owner','admin')"
+            " ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, id"
+        ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "phone_masked": mask_phone(row["phone"]),
+            "role": row["role"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "last_login_at": row["last_login_at"],
+        }
+        for row in rows
+    ]
+
+
+def set_role(raw_phone: str, role: str) -> dict[str, Any]:
+    """按手机号授予 / 收回管理员。目标角色只允许 admin / member。
+
+    **刻意只按手机号、不按 id**：后台不提供用户列表，也就没有 id 可点 ——
+    形式上与能力上一致，后台里不存在「翻别人账号」这条路径。
+    """
+    phone = normalize_phone(raw_phone)
+    target = (role or "").strip()
+    if target not in GRANTABLE_ROLES:
+        raise AuthError("invalid_request", "只能设置成管理员（admin）或普通成员（member）。")
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE phone = ?", (phone,)).fetchone()
+        if row is None:
+            raise AuthError("not_found", "没有找到这个手机号对应的账号。")
+        if row["role"] == "owner":
+            raise AuthError("forbidden", "创始管理员的角色不能在这里修改。")
+        conn.execute("UPDATE users SET role = ? WHERE id = ?", (target, row["id"]))
+        conn.commit()
+    return {"phone_masked": mask_phone(phone), "role": target}
+
+
+def account_stats() -> dict[str, Any]:
+    """账号聚合统计：**只出数字，不出任何明细**（与 observability 同一口径）。"""
+    today = date.today()
+
+    def cutoff(days: int) -> str:
+        return (today - timedelta(days=days)).isoformat()
+
+    with connect() as conn:
+        total = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+        by_role = {
+            row["role"]: row["n"]
+            for row in conn.execute("SELECT role, COUNT(*) AS n FROM users GROUP BY role")
+        }
+        by_status = {
+            row["status"]: row["n"]
+            for row in conn.execute("SELECT status, COUNT(*) AS n FROM users GROUP BY status")
+        }
+        new_7d = conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE substr(created_at,1,10) >= ?", (cutoff(7),)
+        ).fetchone()["n"]
+        new_30d = conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE substr(created_at,1,10) >= ?", (cutoff(30),)
+        ).fetchone()["n"]
+        active_7d = conn.execute(
+            "SELECT COUNT(*) AS n FROM users"
+            " WHERE last_login_at IS NOT NULL AND substr(last_login_at,1,10) >= ?",
+            (cutoff(7),),
+        ).fetchone()["n"]
+        live_logins = conn.execute(
+            "SELECT COUNT(*) AS n FROM auth_sessions WHERE expires_at > ?", (_now(),)
+        ).fetchone()["n"]
+    return {
+        "total": total,
+        "by_role": by_role,
+        "by_status": by_status,
+        "new_7d": new_7d,
+        "new_30d": new_30d,
+        "active_7d": active_7d,
+        # 未过期的登录会话数 ≈「当前有多少人处于登录态」
+        "live_logins": live_logins,
+    }
 
 
 def _consume_invite(conn: sqlite3.Connection, code: str) -> None:

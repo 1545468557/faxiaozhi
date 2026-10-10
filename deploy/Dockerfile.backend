@@ -1,11 +1,36 @@
 FROM python:3.12-slim
 
+# 默认走国内 PyPI 源。理由不是「快一点」，而是**不通**：
+# 境内服务器直连 files.pythonhosted.org 会读超时
+# （实测报 `ReadTimeoutError: HTTPSConnectionPool(host='files.pythonhosted.org')`），
+# 而那时构建已经跑到第 6 层，报错信息里只有一坨 urllib3 栈，很难看出是网络问题。
+#
+# 三个变量都要设：`pip` 认 PIP_INDEX_URL，`uv` 认 UV_* （UV_INDEX_URL 是旧名，
+# UV_DEFAULT_INDEX 是新名，两个都留着以免 uv 版本漂移时静默退回官方源）。
+#
+# 想换成官方源或别的镜像：
+#   docker compose -f deploy/compose.yaml build \
+#     --build-arg PIP_INDEX=https://pypi.org/simple backend v3
+# 腾讯云主机可以换内网源（不走公网流量）：http://mirrors.tencentyun.com/pypi/simple
+ARG PIP_INDEX=https://mirrors.cloud.tencent.com/pypi/simple
+ENV PIP_INDEX_URL=$PIP_INDEX \
+    UV_DEFAULT_INDEX=$PIP_INDEX \
+    UV_INDEX_URL=$PIP_INDEX
+
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 
 RUN pip install --no-cache-dir uv==0.12.9
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+# ⚠️ 这里**刻意不加 `--frozen`**（2026-10-10 在真机上踩到并量过）：
+#   uv.lock 里每个包都记着**绝对 URL**（631 处指向 files.pythonhosted.org）。
+#   加 `--frozen` 时 uv 会照这些 URL 去下载，而境内服务器到 pythonhosted 是
+#   **000（完全连不通）**；腾讯镜像同一时刻是 48.5 MB/s。
+#   症状很有欺骗性：构建不报错，就卡在 `Downloading lxml (5.0MiB)` 十几分钟不动，
+#   看起来像「网慢」，实际是在重试一个连不通的地址。
+#   去掉 --frozen 并显式给 --default-index 后，uv 按镜像重新解析；
+#   **版本仍沿用 lock 里锁定的值**（只有加 --upgrade 才会升版），可复现性没丢。
+RUN uv sync --no-dev --no-install-project --default-index "$PIP_INDEX"
 
 COPY app ./app
 COPY app_v3 ./app_v3

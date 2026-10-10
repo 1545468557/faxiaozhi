@@ -18,6 +18,7 @@ import { BookOpen, FileText, Sparkles, PanelLeft, Search, Settings, User, Clock,
 import { useEffect, useState, type ReactNode } from "react";
 import { sessions, type V3SessionBrief } from "@/lib/api/v3";
 import { useSessionState } from "@/components/workspace-session";
+import { TopbarAuth } from "@/components/shell/topbar-auth";
 
 const NAV = [
   { href: "/", label: "法律问答", icon: Sparkles },
@@ -94,10 +95,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           <p className="nav-history-note">当前浏览器会保留访客身份；共用此浏览器的人可能看到这些对话。</p>
         </aside>
       </>}
-      <main className="v2-main nav-main" id="main-content">
+      <main className="v2-main nav-main" id="main-content" key={pathname}>
         <header className="nav-topbar">
           {isAskPage && (historyOpen ? <span className="nav-current-module">{NAV.find(item => isActive(item.href))?.label || "法小智"}</span> : <button aria-expanded={false} onClick={() => {setHistoryStatus("正在加载…"); setHistoryRows([]); setHistoryOpen(true);}}><Clock size={20} />历史对话</button>)}
-          <span className="nav-brand">法小智</span>
+          {/* marginLeft:auto：左侧「历史对话」只在问答页渲染，不加的话非问答页这组会掉到左边（2026-10-10） */}
+          <span style={{ display: "flex", alignItems: "center", gap: 12, marginLeft: "auto" }}>
+            {/* 登录/注册入口放在品牌「法小智」旁边，全站常驻可见 */}
+            <TopbarAuth />
+            <span className="nav-brand">法小智</span>
+          </span>
         </header>
         {children}
       </main>

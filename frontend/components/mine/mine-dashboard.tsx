@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * 「我的」（迭代 3 追加）
+ * 「我的」
  *
- * 本机工作台：把这台电脑上的东西集中到一页。
- * 四个区块都能显示真实数据：
+ * 个人中心：账号 + 把这台电脑上的东西集中到一页。
+ * 五个区块：
+ *   ⓪ 账号（2026-10-10 加入：登录 / 注册 / 退出，入口从设置页挪到这里）
  *   ① 我的会话（三条链路 + 首页快速问答，含"空闲 30 分钟自动结束"的说明，可一键清空本机数据）
  *   ② 我上传的材料（<b>当前会话内</b>；并如实写明原文不落盘）
  *   ③ 我导出的文件（可重新下载；列出本机全部导出）
@@ -26,6 +27,7 @@ import {
   type ExportFile,
 } from "@/lib/api/mine";
 import type { MaterialItem, SessionState } from "@/lib/api/types";
+import { AccountSection } from "@/components/account-section";
 
 type BranchRow = { branch: BranchKey; sid: string | null; state: SessionState | null };
 
@@ -106,6 +108,12 @@ export function MineDashboard() {
           {notice}
         </p>
       )}
+
+      {/* ⓪ 账号状态（2026-10-10 按用户拍板：登录/注册表单只留在独立登录页 /login，
+          这里未登录只显示引导，已登录显示手机号 + 退出） */}
+      <div style={{ marginBottom: 16 }}>
+        <AccountSection variant="status" />
+      </div>
 
       {/* ① 我的会话 */}
       <section className="ct-card" style={{ marginBottom: 16 }}>
