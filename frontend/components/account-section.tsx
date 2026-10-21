@@ -26,6 +26,18 @@ type Status = "loading" | "signedOut" | "signedIn";
 
 const ROLE_LABEL: Record<string, string> = { owner: "管理员", member: "成员" };
 
+/**
+ * 后端缺接口（部署版本不一致时会出现 `not_found` + "接口不存在。"）不该原样显示给用户：
+ * 用户看不懂，也帮不上忙。这里统一换成可行动的人话；其它业务错误仍保留后端原文。
+ */
+function authErrorMessage(cause: unknown, fallback: string): string {
+  if (!(cause instanceof AuthError)) return fallback;
+  if (cause.code === "not_found" || /接口不存在|not\s*found/i.test(cause.message)) {
+    return "登录服务暂时不可用，请稍后再试（站点正在更新）。";
+  }
+  return cause.message;
+}
+
 export function AccountSection({ variant = "full", onAuthed }: { variant?: "full" | "status"; onAuthed?: (user: AuthUser) => void } = {}) {
   const [status, setStatus] = useState<Status>("loading");
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -74,7 +86,7 @@ export function AccountSection({ variant = "full", onAuthed }: { variant?: "full
       setSent({ phone_masked: res.phone_masked, mock: res.mock, channel: res.channel });
       setCooldown(res.retry_after);
     } catch (cause) {
-      setError(cause instanceof AuthError ? cause.message : "验证码发送失败，请稍后再试。");
+      setError(authErrorMessage(cause, "验证码发送失败，请稍后再试。"));
     } finally {
       setBusy(false);
     }
@@ -92,7 +104,7 @@ export function AccountSection({ variant = "full", onAuthed }: { variant?: "full
       onAuthed?.(result.user);
     } catch (cause) {
       if (!(cause instanceof AuthError)) { setError("请求失败，请稍后再试。"); return; }
-      setError(cause.message);
+      setError(authErrorMessage(cause, "请求失败，请稍后再试。"));
       if (mode === "login" && cause.code === "auth_failed") {
         setHint("这个手机号还没注册。请切到「注册」、填邀请码，并重新发一条验证码（刚那条登录码已被作废）。");
       }

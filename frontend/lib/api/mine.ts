@@ -61,9 +61,17 @@ export function clearLocalData(): number {
 
 export async function exportsList(): Promise<ExportFile[]> {
   const response = await fetch(`${BFF}/exports`, { headers: { accept: "application/json" } });
+  // 接口还没部署（旧构建）时后端/静态路由会回 404，这里按「暂无导出」处理，
+  // 不要因此把「我的」页整块推进错误态 —— 缺接口≠用户数据出错。
+  if (response.status === 404) return [];
   if (!response.ok) throw new Error("读取导出文件列表失败。");
-  const data = (await response.json()) as { items?: ExportFile[] };
-  return data.items ?? [];
+  try {
+    const data = (await response.json()) as { items?: ExportFile[] };
+    return data.items ?? [];
+  } catch {
+    // 404 被前端兜底成 HTML、或返回体不是 JSON 时同样降级为空列表
+    return [];
+  }
 }
 
 /** 某一分支的会话状态（会话不存在返回 null，不抛错） */
